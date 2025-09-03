@@ -42,7 +42,7 @@ class CategoryController extends Controller
                     'name' => $category->name,
                     'slug' => $category->slug,
                     'description' => $category->description,
-                    'image_main' => $category->image_main ? asset('storage/' . $category->image_main) : null,
+                    'image_main' => $category->image_main ? (str_starts_with($category->image_main, 'data:') ? $category->image_main : asset('storage/' . $category->image_main)) : null,
                     'is_active' => $category->is_active, // Inclure le statut actif
                     'has_subcategories' => $category->children->count() > 0,
                     'subcategories_count' => $category->children->count(),
@@ -53,7 +53,7 @@ class CategoryController extends Controller
                             'name' => $subcategory->name,
                             'slug' => $subcategory->slug,
                             'description' => $subcategory->description,
-                            'image_main' => $subcategory->image_main ? asset('storage/' . $subcategory->image_main) : null,
+                            'image_main' => $subcategory->image_main ? (str_starts_with($subcategory->image_main, 'data:') ? $subcategory->image_main : asset('storage/' . $subcategory->image_main)) : null,
                             'is_active' => $subcategory->is_active, // Inclure le statut actif
                             'products_count' => $subcategory->products()->count(),
                             'created_at' => $subcategory->created_at,
@@ -104,7 +104,8 @@ class CategoryController extends Controller
             // Cache pour les catégories (cache long car elles changent rarement)
             $cacheKey = 'categories_index_active';
             
-            $cachedResult = Cache::remember($cacheKey, 1800, function () {
+            // Cache désactivé temporairement
+            $cachedResult = function () {
                 // Récupérer toutes les catégories actives avec leurs relations
                 $categories = Category::with(['children' => function ($query) {
                         $query->where('is_active', true)
@@ -126,7 +127,7 @@ class CategoryController extends Controller
                     'name' => $category->name,
                     'slug' => $category->slug,
                     'description' => $category->description,
-                    'image_main' => $category->image_main ? asset('storage/' . $category->image_main) : null,
+                    'image_main' => $category->image_main ? (str_starts_with($category->image_main, 'data:') ? $category->image_main : asset('storage/' . $category->image_main)) : null,
                     'has_subcategories' => $category->children->count() > 0,
                     'subcategories_count' => $category->children->count(),
                     'products_count' => $category->products()->count(),
@@ -136,7 +137,7 @@ class CategoryController extends Controller
                             'name' => $subcategory->name,
                             'slug' => $subcategory->slug,
                             'description' => $subcategory->description,
-                            'image_main' => $subcategory->image_main ? asset('storage/' . $subcategory->image_main) : null,
+                            'image_main' => $subcategory->image_main ? (str_starts_with($subcategory->image_main, 'data:') ? $subcategory->image_main : asset('storage/' . $subcategory->image_main)) : null,
                             'products_count' => $subcategory->products()->count(),
                             'created_at' => $subcategory->created_at,
                             'updated_at' => $subcategory->updated_at
@@ -155,9 +156,9 @@ class CategoryController extends Controller
                         'total' => $categories->count()
                     ]
                 ];
-            });
+            };
 
-            return response()->json($cachedResult, 200);
+            return response()->json($cachedResult(), 200);
 
         } catch (\Exception $e) {
             return response()->json([

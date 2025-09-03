@@ -27,14 +27,14 @@ class ProductController extends Controller
             $cacheKey = 'products_index_' . md5(serialize($request->all()));
             
             // Vérifier le cache d'abord
-            $cachedResult = Cache::remember($cacheKey, 300, function () use ($request) {
-                // Construire la requête de base
-                $query = Product::with(['category' => function ($categoryQuery) {
-                        $categoryQuery->with('parent'); // Charger aussi la catégorie parente
-                    }, 'variants' => function ($variantQuery) {
-                        $variantQuery->where('is_active', true);
-                    }])
-                    ->where('is_active', true);
+            // Cache désactivé temporairement - exécution directe
+            // Construire la requête de base
+            $query = Product::with(['category' => function ($categoryQuery) {
+                    $categoryQuery->with('parent'); // Charger aussi la catégorie parente
+                }, 'variants' => function ($variantQuery) {
+                    $variantQuery->where('is_active', true);
+                }])
+                ->where('is_active', true);
 
             // Filtre par catégorie principale
             if ($request->has('category_id') && $request->category_id) {
@@ -123,25 +123,24 @@ class ProductController extends Controller
                 ];
             });
 
-                // Formater la réponse avec pagination
-                return [
-                    'success' => true,
-                    'message' => 'Produits récupérés avec succès',
-                    'data' => [
-                        'products' => $formattedProducts,
-                        'pagination' => [
-                            'current_page' => $products->currentPage(),
-                            'last_page' => $products->lastPage(),
-                            'per_page' => $products->perPage(),
-                            'total' => $products->total(),
-                            'from' => $products->firstItem(),
-                            'to' => $products->lastItem()
-                        ]
+            // Formater la réponse avec pagination
+            $result = [
+                'success' => true,
+                'message' => 'Produits récupérés avec succès',
+                'data' => [
+                    'products' => $formattedProducts,
+                    'pagination' => [
+                        'current_page' => $products->currentPage(),
+                        'last_page' => $products->lastPage(),
+                        'per_page' => $products->perPage(),
+                        'total' => $products->total(),
+                        'from' => $products->firstItem(),
+                        'to' => $products->lastItem()
                     ]
-                ];
-            });
+                ]
+            ];
 
-            return response()->json($cachedResult, 200);
+            return response()->json($result, 200);
 
         } catch (\Exception $e) {
             return response()->json([
@@ -164,20 +163,20 @@ class ProductController extends Controller
             // Cache pour un produit spécifique
             $cacheKey = "product_show_{$id}";
             
-            $cachedResult = Cache::remember($cacheKey, 600, function () use ($id) {
-                // Récupérer le produit avec toutes ses relations
-                $product = Product::with([
-                    'category' => function ($query) {
-                        $query->with('parent'); // Charger aussi la catégorie parente
-                    },
-                    'variants' => function ($query) {
-                        $query->where('is_active', true)
-                              ->orderBy('sort_order');
-                    },
-                    'images' => function ($query) {
-                        $query->orderBy('sort_order');
-                    }
-                ])->find($id);
+            // Cache désactivé temporairement - exécution directe
+            // Récupérer le produit avec toutes ses relations
+            $product = Product::with([
+                'category' => function ($query) {
+                    $query->with('parent'); // Charger aussi la catégorie parente
+                },
+                'variants' => function ($query) {
+                    $query->where('is_active', true)
+                          ->orderBy('sort_order');
+                },
+                'images' => function ($query) {
+                    $query->orderBy('sort_order');
+                }
+            ])->find($id);
 
             // Vérifier si le produit existe
             if (!$product) {
@@ -264,14 +263,13 @@ class ProductController extends Controller
                 'updated_at' => $product->updated_at
             ];
 
-                return [
-                    'success' => true,
-                    'message' => 'Produit récupéré avec succès',
-                    'data' => $formattedProduct
-                ];
-            });
+            $result = [
+                'success' => true,
+                'message' => 'Produit récupéré avec succès',
+                'data' => $formattedProduct
+            ];
 
-            return response()->json($cachedResult, 200);
+            return response()->json($result, 200);
 
         } catch (\Exception $e) {
             return response()->json([
