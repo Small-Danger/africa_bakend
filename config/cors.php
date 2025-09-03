@@ -32,7 +32,10 @@ return [
         // Ajout d'origines plus permissives pour le développement
         'http://192.168.11.*:5173',
         'http://192.168.11.*:3000',
-        'http://192.168.11.*:8080'
+        'http://192.168.11.*:8080',
+        // URLs Railway
+        'https://africafrontend-production.up.railway.app',
+        'https://*.up.railway.app'
     ],
 
     'allowed_origins_patterns' => [],
