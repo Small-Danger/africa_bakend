@@ -43,7 +43,7 @@ class CategoryController extends Controller
                     'name' => $category->name,
                     'slug' => $category->slug,
                     'description' => $category->description,
-                    'image_main' => $category->image_main,
+                    'image_main' => $category->image_main ? (str_starts_with($category->image_main, 'http') ? $category->image_main : asset('storage/' . $category->image_main)) : null,
                     'is_active' => $category->is_active, // Inclure le statut actif
                     'has_subcategories' => $category->children->count() > 0,
                     'subcategories_count' => $category->children->count(),
@@ -128,7 +128,7 @@ class CategoryController extends Controller
                     'name' => $category->name,
                     'slug' => $category->slug,
                     'description' => $category->description,
-                    'image_main' => $category->image_main,
+                    'image_main' => $category->image_main ? (str_starts_with($category->image_main, 'http') ? $category->image_main : asset('storage/' . $category->image_main)) : null,
                     'has_subcategories' => $category->children->count() > 0,
                     'subcategories_count' => $category->children->count(),
                     'products_count' => $category->products()->count(),
@@ -212,7 +212,7 @@ class CategoryController extends Controller
                 'name' => $category->name,
                 'slug' => $category->slug,
                 'description' => $category->description,
-                'image_main' => $category->image_main,
+                                    'image_main' => $category->image_main ? (str_starts_with($category->image_main, 'http') ? $category->image_main : asset('storage/' . $category->image_main)) : null,
                 'is_active' => $category->is_active, // Inclure le statut actif
                 'is_main_category' => $category->isMain(),
                 'parent_category' => $category->parent ? [
@@ -371,7 +371,7 @@ class CategoryController extends Controller
                 'name' => $category->name,
                 'slug' => $category->slug,
                 'description' => $category->description,
-                'image_main' => $category->image_main,
+                                    'image_main' => $category->image_main ? (str_starts_with($category->image_main, 'http') ? $category->image_main : asset('storage/' . $category->image_main)) : null,
                 'parent_category' => $category->parent ? [
                     'id' => $category->parent->id,
                     'name' => $category->parent->name,
@@ -539,7 +539,7 @@ class CategoryController extends Controller
                 'name' => $category->name,
                 'slug' => $category->slug,
                 'description' => $category->description,
-                'image_main' => $category->image_main,
+                                    'image_main' => $category->image_main ? (str_starts_with($category->image_main, 'http') ? $category->image_main : asset('storage/' . $category->image_main)) : null,
                 'parent_category' => $category->parent ? [
                     'id' => $category->parent->id,
                     'name' => $category->parent->name,
