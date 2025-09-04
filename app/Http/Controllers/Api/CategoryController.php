@@ -43,7 +43,7 @@ class CategoryController extends Controller
                     'name' => $category->name,
                     'slug' => $category->slug,
                     'description' => $category->description,
-                    'image_main' => $category->image_main ? (str_starts_with($category->image_main, 'http') ? $category->image_main : asset('storage/' . $category->image_main)) : null,
+                    'image_main' => $category->image_main && str_starts_with($category->image_main, 'http') ? $category->image_main : null,
                     'is_active' => $category->is_active, // Inclure le statut actif
                     'has_subcategories' => $category->children->count() > 0,
                     'subcategories_count' => $category->children->count(),
@@ -128,7 +128,7 @@ class CategoryController extends Controller
                     'name' => $category->name,
                     'slug' => $category->slug,
                     'description' => $category->description,
-                    'image_main' => $category->image_main ? (str_starts_with($category->image_main, 'http') ? $category->image_main : asset('storage/' . $category->image_main)) : null,
+                    'image_main' => $category->image_main && str_starts_with($category->image_main, 'http') ? $category->image_main : null,
                     'has_subcategories' => $category->children->count() > 0,
                     'subcategories_count' => $category->children->count(),
                     'products_count' => $category->products()->count(),
@@ -212,7 +212,7 @@ class CategoryController extends Controller
                 'name' => $category->name,
                 'slug' => $category->slug,
                 'description' => $category->description,
-                                    'image_main' => $category->image_main ? (str_starts_with($category->image_main, 'http') ? $category->image_main : asset('storage/' . $category->image_main)) : null,
+                                    'image_main' => $category->image_main && str_starts_with($category->image_main, 'http') ? $category->image_main : null,
                 'is_active' => $category->is_active, // Inclure le statut actif
                 'is_main_category' => $category->isMain(),
                 'parent_category' => $category->parent ? [
@@ -323,12 +323,12 @@ class CategoryController extends Controller
             }
 
             // Traitement de l'image si fournie (base64)
-            $imagePath = null;
+            $imageUrl = null;
             if ($request->filled('image_main') && is_string($request->image_main)) {
                 try {
                     // Vérifier que c'est bien une image base64
                     if (strpos($request->image_main, 'data:image/') === 0) {
-                        // Extraire les données base64
+                        // Créer un fichier temporaire pour Cloudinary
                         $base64Data = $request->image_main;
                         $imageData = base64_decode(explode(',', $base64Data)[1]);
                         
@@ -339,11 +339,33 @@ class CategoryController extends Controller
                         // Générer un nom de fichier unique
                         $fileName = 'category_' . time() . '_' . Str::random(10) . '.' . $extension;
                         
-                        // Stocker l'image dans le dossier categories
-                        $imagePath = 'categories/' . $fileName;
-                        Storage::disk('public')->put($imagePath, $imageData);
+                        // Créer un fichier temporaire
+                        $tempFile = tmpfile();
+                        fwrite($tempFile, $imageData);
+                        $tempPath = stream_get_meta_data($tempFile)['uri'];
                         
-                        \Log::info('Image base64 traitée et sauvegardée:', ['path' => $imagePath, 'size' => strlen($imageData)]);
+                        // Créer un UploadedFile pour Cloudinary
+                        $uploadedFile = new \Illuminate\Http\UploadedFile(
+                            $tempPath,
+                            $fileName,
+                            $mimeType,
+                            null,
+                            true
+                        );
+                        
+                        // Upload vers Cloudinary
+                        $cloudinaryService = new CloudinaryService();
+                        $result = $cloudinaryService->uploadImage($uploadedFile, 'bs_shop/categories');
+                        
+                        if ($result['success']) {
+                            $imageUrl = $result['secure_url'];
+                            \Log::info('Image uploadée vers Cloudinary:', ['url' => $imageUrl]);
+                        } else {
+                            \Log::error('Erreur upload Cloudinary:', ['error' => $result['error']]);
+                        }
+                        
+                        // Fermer le fichier temporaire
+                        fclose($tempFile);
                     }
                 } catch (\Exception $e) {
                     \Log::error('Erreur lors du traitement de l\'image base64:', ['error' => $e->getMessage()]);
@@ -356,7 +378,7 @@ class CategoryController extends Controller
                 'name' => $request->name,
                 'slug' => $slug,
                 'description' => $request->description ?? null,
-                'image_main' => $imagePath,
+                'image_main' => $imageUrl,
                 'parent_id' => $request->parent_id,
                 'sort_order' => $request->sort_order ?? 0,
                 'is_active' => $request->is_active ?? true
@@ -371,7 +393,7 @@ class CategoryController extends Controller
                 'name' => $category->name,
                 'slug' => $category->slug,
                 'description' => $category->description,
-                                    'image_main' => $category->image_main ? (str_starts_with($category->image_main, 'http') ? $category->image_main : asset('storage/' . $category->image_main)) : null,
+                                    'image_main' => $category->image_main && str_starts_with($category->image_main, 'http') ? $category->image_main : null,
                 'parent_category' => $category->parent ? [
                     'id' => $category->parent->id,
                     'name' => $category->parent->name,
@@ -539,7 +561,7 @@ class CategoryController extends Controller
                 'name' => $category->name,
                 'slug' => $category->slug,
                 'description' => $category->description,
-                                    'image_main' => $category->image_main ? (str_starts_with($category->image_main, 'http') ? $category->image_main : asset('storage/' . $category->image_main)) : null,
+                                    'image_main' => $category->image_main && str_starts_with($category->image_main, 'http') ? $category->image_main : null,
                 'parent_category' => $category->parent ? [
                     'id' => $category->parent->id,
                     'name' => $category->parent->name,
