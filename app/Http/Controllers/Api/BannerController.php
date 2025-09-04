@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Banner;
+use App\Services\CloudinaryService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
@@ -40,7 +41,7 @@ class BannerController extends Controller
                     return [
                         'id' => $banner->id,
                         'title' => $banner->title,
-                        'image_url' => $banner->image_url,
+                        'image_url' => $banner->image,
                         'link_url' => $banner->link_url,
                         'position' => $banner->position,
                         'created_at' => $banner->created_at,
@@ -77,7 +78,7 @@ class BannerController extends Controller
                     return [
                         'id' => $banner->id,
                         'title' => $banner->title,
-                        'image_url' => $banner->image_url,
+                        'image_url' => $banner->image,
                         'link_url' => $banner->link_url,
                         'is_active' => $banner->is_active,
                         'position' => $banner->position,
@@ -122,7 +123,7 @@ class BannerController extends Controller
             $formattedBanner = [
                 'id' => $banner->id,
                 'title' => $banner->title,
-                'image_url' => $banner->image_url,
+                'image_url' => $banner->image,
                 'link_url' => $banner->link_url,
                 'is_active' => $banner->is_active,
                 'position' => $banner->position,
@@ -184,24 +185,30 @@ class BannerController extends Controller
                 ], 422);
             }
 
-            // Traitement de l'image
-            $imagePath = null;
+            // Traitement de l'image avec Cloudinary
+            $imageUrl = null;
+            $cloudinaryService = new CloudinaryService();
             
             // Vérifier si c'est une image base64
             if ($request->has('image') && $request->image && is_string($request->image)) {
-                $imagePath = $this->saveBase64Image($request->image, 'banners');
+                $uploadResult = $cloudinaryService->uploadBase64Image($request->image, 'bs_shop/banners');
+                if ($uploadResult['success']) {
+                    $imageUrl = $uploadResult['secure_url'];
+                }
             }
             // Vérifier si c'est un fichier uploadé (compatibilité FormData)
             elseif ($request->hasFile('image_file')) {
                 $image = $request->file('image_file');
-                $fileName = 'banner_' . time() . '_' . Str::random(10) . '.' . $image->getClientOriginalExtension();
-                $imagePath = $image->storeAs('banners', $fileName, 'public');
+                $uploadResult = $cloudinaryService->uploadImage($image, 'bs_shop/banners');
+                if ($uploadResult['success']) {
+                    $imageUrl = $uploadResult['secure_url'];
+                }
             }
 
             // Créer la bannière
             $banner = Banner::create([
                 'title' => $request->title,
-                'image' => $imagePath,
+                'image' => $imageUrl,
                 'link_url' => $request->link_url,
                 'is_active' => $request->is_active ?? true,
                 'position' => $request->position ?? 0
@@ -211,7 +218,7 @@ class BannerController extends Controller
             $formattedBanner = [
                 'id' => $banner->id,
                 'title' => $banner->title,
-                'image_url' => $banner->image_url,
+                'image_url' => $banner->image,
                 'link_url' => $banner->link_url,
                 'is_active' => $banner->is_active,
                 'position' => $banner->position,
@@ -340,7 +347,7 @@ class BannerController extends Controller
             $formattedBanner = [
                 'id' => $banner->id,
                 'title' => $banner->title,
-                'image_url' => $banner->image_url,
+                'image_url' => $banner->image,
                 'link_url' => $banner->link_url,
                 'is_active' => $banner->is_active,
                 'position' => $banner->position,

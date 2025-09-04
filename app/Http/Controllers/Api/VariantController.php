@@ -192,7 +192,7 @@ class VariantController extends Controller
                     'slug' => $variant->product->slug,
                     'description' => $variant->product->description,
                     'base_price' => $variant->product->base_price,
-                    'image_main' => $variant->product->image_main ? asset('storage/' . $variant->product->image_main) : null,
+                    'image_main' => $variant->product->image_main,
                     'category' => [
                         'id' => $variant->product->category->id,
                         'name' => $variant->product->category->name,

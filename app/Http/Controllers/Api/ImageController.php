@@ -52,7 +52,7 @@ class ImageController extends Controller
             $formattedImages = $images->map(function ($image) {
                 return [
                     'id' => $image->id,
-                    'media_path' => asset('storage/' . $image->media_path),
+                    'media_path' => $image->media_path,
                     'alt_text' => $image->alt_text,
                     'title' => $image->title,
                     'sort_order' => $image->sort_order,
@@ -83,7 +83,7 @@ class ImageController extends Controller
                         'id' => $product->id,
                         'name' => $product->name,
                         'slug' => $product->slug,
-                        'image_main' => $product->image_main ? asset('storage/' . $product->image_main) : null
+                        'image_main' => $product->image_main
                     ],
                     'images' => [
                         'data' => $formattedImages,
@@ -207,7 +207,7 @@ class ImageController extends Controller
                     // Formater la réponse pour ce média
                     $uploadedMedia[] = [
                         'id' => $media->id,
-                        'media_path' => asset('storage/' . $media->media_path),
+                        'media_path' => $media->media_path,
                         'media_type' => $media->media_type,
                         'alt_text' => $media->alt_text,
                         'title' => $media->title,
@@ -409,7 +409,7 @@ class ImageController extends Controller
                 ->map(function ($media) {
                     return [
                         'id' => $media->id,
-                        'media_path' => asset('storage/' . $media->media_path),
+                        'media_path' => $media->media_path,
                         'media_type' => $media->media_type,
                         'alt_text' => $media->alt_text,
                         'title' => $media->title,

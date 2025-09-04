@@ -59,7 +59,7 @@ class CartController extends Controller
                         'name' => $product->name,
                         'slug' => $product->slug,
                         'description' => Str::limit($product->description, 100),
-                        'image_main' => $product->image_main ? asset('storage/' . $product->image_main) : null,
+                        'image_main' => $product->image_main,
                         'category' => [
                             'id' => $product->category->id,
                             'name' => $product->category->name,
@@ -227,7 +227,7 @@ class CartController extends Controller
                     'id' => $cartItem->product->id,
                     'name' => $cartItem->product->name,
                     'slug' => $cartItem->product->slug,
-                    'image_main' => $cartItem->product->image_main ? asset('storage/' . $cartItem->product->image_main) : null,
+                    'image_main' => $cartItem->product->image_main,
                     'category' => [
                         'id' => $cartItem->product->category->id,
                         'name' => $cartItem->product->category->name
@@ -337,7 +337,7 @@ class CartController extends Controller
                     'id' => $cartItem->product->id,
                     'name' => $cartItem->product->name,
                     'slug' => $cartItem->product->slug,
-                    'image_main' => $cartItem->product->image_main ? asset('storage/' . $cartItem->product->image_main) : null,
+                    'image_main' => $cartItem->product->image_main,
                     'category' => [
                         'id' => $cartItem->product->category->id,
                         'name' => $cartItem->product->category->name

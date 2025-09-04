@@ -267,7 +267,7 @@ class SuggestionController extends Controller
                 'name' => $product->name,
                 'slug' => $product->slug,
                 'description' => \Str::limit($product->description, 100),
-                'image_main' => $product->image_main ? asset('storage/' . $product->image_main) : null,
+                'image_main' => $product->image_main,
                 'price' => $price,
                 'base_price' => $product->base_price,
                 'category' => [

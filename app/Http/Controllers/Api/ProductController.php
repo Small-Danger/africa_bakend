@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\Category;
+use App\Services\CloudinaryService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
@@ -100,7 +101,7 @@ class ProductController extends Controller
                     'slug' => $product->slug,
                     'description' => Str::limit($product->description, 150),
                     'base_price' => $product->base_price,
-                    'image_main' => $product->image_main ? asset('storage/' . $product->image_main) : null,
+                    'image_main' => $product->image_main,
                     'category' => [
                         'id' => $product->category->id,
                         'name' => $product->category->name,
@@ -231,7 +232,7 @@ class ProductController extends Controller
                 'images' => $product->images->map(function ($image) {
                     return [
                         'id' => $image->id,
-                        'media_path' => asset('storage/' . $image->media_path),
+                        'media_path' => $image->media_path,
                         'media_type' => $image->media_type,
                         'alt_text' => $image->alt_text,
                         'title' => $image->title,
@@ -241,7 +242,7 @@ class ProductController extends Controller
                 'videos' => $product->videos->map(function ($video) {
                     return [
                         'id' => $video->id,
-                        'media_path' => asset('storage/' . $video->media_path),
+                        'media_path' => $video->media_path,
                         'alt_text' => $video->alt_text,
                         'title' => $video->title,
                         'sort_order' => $video->sort_order
@@ -347,18 +348,24 @@ class ProductController extends Controller
                 $counter++;
             }
 
-            // Traitement de l'image principale
-            $imagePath = null;
+            // Traitement de l'image principale avec Cloudinary
+            $imageUrl = null;
+            $cloudinaryService = new CloudinaryService();
             
             // Vérifier si c'est une image base64
             if ($request->has('image_main') && $request->image_main && is_string($request->image_main)) {
-                $imagePath = $this->saveBase64Image($request->image_main, 'products');
+                $uploadResult = $cloudinaryService->uploadBase64Image($request->image_main, 'bs_shop/products');
+                if ($uploadResult['success']) {
+                    $imageUrl = $uploadResult['secure_url'];
+                }
             }
             // Vérifier si c'est un fichier uploadé (compatibilité FormData)
             elseif ($request->hasFile('image_main_file')) {
                 $image = $request->file('image_main_file');
-                $fileName = 'product_' . time() . '_' . Str::random(10) . '.' . $image->getClientOriginalExtension();
-                $imagePath = $image->storeAs('products', $fileName, 'public');
+                $uploadResult = $cloudinaryService->uploadImage($image, 'bs_shop/products');
+                if ($uploadResult['success']) {
+                    $imageUrl = $uploadResult['secure_url'];
+                }
             }
 
             // Créer le produit
@@ -368,7 +375,7 @@ class ProductController extends Controller
                 'description' => $request->description,
                 'base_price' => $request->base_price,
                 'category_id' => $request->category_id,
-                'image_main' => $imagePath,
+                'image_main' => $imageUrl,
                 'sort_order' => $request->sort_order ?? 0,
                 'is_active' => true
             ]);
@@ -726,16 +733,17 @@ class ProductController extends Controller
                 return false;
             }
 
-            // Sauvegarder l'image
-            $imagePath = $this->saveBase64Image($imageData['data'], 'products/images');
+            // Uploader l'image vers Cloudinary
+            $cloudinaryService = new CloudinaryService();
+            $uploadResult = $cloudinaryService->uploadBase64Image($imageData['data'], 'bs_shop/products/images');
             
-            if (!$imagePath) {
+            if (!$uploadResult['success']) {
                 return false;
             }
 
             // Créer l'enregistrement en base de données
             $product->images()->create([
-                'media_path' => $imagePath,
+                'media_path' => $uploadResult['secure_url'],
                 'media_type' => 'image',
                 'alt_text' => $imageData['alt_text'] ?? null,
                 'title' => $imageData['title'] ?? null,
@@ -747,4 +755,5 @@ class ProductController extends Controller
             return false;
         }
     }
+
 }

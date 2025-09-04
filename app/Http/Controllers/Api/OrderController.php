@@ -611,7 +611,7 @@ class OrderController extends Controller
                             'id' => $item->product->id,
                             'name' => $item->product->name,
                             'slug' => $item->product->slug,
-                            'image_main' => $item->product->image_main ? asset('storage/' . $item->product->image_main) : null,
+                            'image_main' => $item->product->image_main,
                             'category' => [
                                 'id' => $item->product->category->id,
                                 'name' => $item->product->category->name
@@ -794,7 +794,7 @@ class OrderController extends Controller
                             'id' => $item->product->id,
                             'name' => $item->product->name,
                             'slug' => $item->product->slug,
-                            'image_main' => $item->product->image_main ? asset('storage/' . $item->product->image_main) : null,
+                            'image_main' => $item->product->image_main,
                             'category' => [
                                 'id' => $item->product->category->id,
                                 'name' => $item->product->category->name
