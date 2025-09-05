@@ -351,6 +351,14 @@ class VariantController extends Controller
                 ], 404);
             }
 
+            // Vérifier que la variante appartient au bon produit
+            if ($variant->product_id != $productId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cette variante n\'appartient pas à ce produit'
+                ], 403);
+            }
+
             // Vérifier si le produit parent est actif
             if (!$variant->product->is_active) {
                 return response()->json([
@@ -362,7 +370,7 @@ class VariantController extends Controller
             // Validation des données de mise à jour
             $validator = Validator::make($request->all(), [
                 'name' => 'sometimes|string|max:255',
-                'sku' => 'sometimes|string|max:100|unique:product_variants,sku,' . $id,
+                'sku' => 'sometimes|string|max:100|unique:product_variants,sku,' . $variantId,
                 'price' => 'sometimes|numeric|min:0',
                 'stock_quantity' => 'sometimes|integer|min:0',
                 'sort_order' => 'sometimes|integer|min:0',
@@ -479,6 +487,14 @@ class VariantController extends Controller
                     'success' => false,
                     'message' => 'Variante non trouvée'
                 ], 404);
+            }
+
+            // Vérifier que la variante appartient au bon produit
+            if ($variant->product_id != $productId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cette variante n\'appartient pas à ce produit'
+                ], 403);
             }
 
             // Vérifier s'il y a des commandes associées à cette variante
