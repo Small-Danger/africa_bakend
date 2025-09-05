@@ -370,9 +370,9 @@ class VariantController extends Controller
             // Validation des données de mise à jour
             $validator = Validator::make($request->all(), [
                 'name' => 'sometimes|string|max:255',
-                'sku' => 'sometimes|string|max:100|unique:product_variants,sku,' . $variantId,
+                'sku' => 'sometimes|nullable|string|max:100|unique:product_variants,sku,' . $variantId,
                 'price' => 'sometimes|numeric|min:0',
-                'stock_quantity' => 'sometimes|integer|min:0',
+                'stock_quantity' => 'sometimes|nullable|integer|min:0',
                 'sort_order' => 'sometimes|integer|min:0',
                 'is_active' => 'sometimes|boolean'
             ], [
