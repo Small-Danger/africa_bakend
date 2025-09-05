@@ -351,6 +351,82 @@ class ImageController extends Controller
     }
 
     /**
+     * Mettre à jour une image/vidéo d'un produit (ADMIN ONLY)
+     * 
+     * @param Request $request - Nouvelles données de l'image
+     * @param int $product_id - ID du produit
+     * @param int $image_id - ID de l'image/vidéo à modifier
+     * @return JsonResponse - Image mise à jour
+     */
+    public function update(Request $request, int $product_id, int $image_id): JsonResponse
+    {
+        try {
+            // Récupérer le produit
+            $product = Product::find($product_id);
+
+            // Vérifier si le produit existe
+            if (!$product) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Produit non trouvé'
+                ], 404);
+            }
+
+            // Récupérer l'image à modifier
+            $image = $product->images()->find($image_id);
+
+            // Vérifier si l'image existe
+            if (!$image) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Image non trouvée'
+                ], 404);
+            }
+
+            // Valider les données
+            $validated = $request->validate([
+                'alt_text' => 'nullable|string|max:255',
+                'title' => 'nullable|string|max:255',
+                'sort_order' => 'nullable|integer|min:0',
+                'is_active' => 'nullable|boolean'
+            ]);
+
+            // Mettre à jour l'image
+            $image->update(array_filter($validated, function($value) {
+                return $value !== null;
+            }));
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Image mise à jour avec succès',
+                'data' => [
+                    'id' => $image->id,
+                    'media_path' => $image->media_path,
+                    'alt_text' => $image->alt_text,
+                    'title' => $image->title,
+                    'sort_order' => $image->sort_order,
+                    'is_active' => $image->is_active,
+                    'created_at' => $image->created_at,
+                    'updated_at' => $image->updated_at
+                ]
+            ]);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Données invalides',
+                'errors' => $e->errors()
+            ], 422);
+        } catch (\Exception $e) {
+            \Log::error('Erreur lors de la mise à jour de l\'image: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la mise à jour de l\'image'
+            ], 500);
+        }
+    }
+
+    /**
      * Mettre à jour l'ordre des médias d'un produit (ADMIN ONLY)
      * 
      * @param Request $request - Nouvel ordre des médias

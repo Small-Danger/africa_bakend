@@ -337,11 +337,11 @@ class VariantController extends Controller
      * @param int $id - ID de la variante à modifier
      * @return JsonResponse - Variante mise à jour
      */
-    public function update(Request $request, int $id): JsonResponse
+    public function update(Request $request, int $productId, int $variantId): JsonResponse
     {
         try {
             // Récupérer la variante à modifier
-            $variant = ProductVariant::with(['product.category'])->find($id);
+            $variant = ProductVariant::with(['product.category'])->find($variantId);
 
             // Vérifier si la variante existe
             if (!$variant) {
@@ -467,11 +467,11 @@ class VariantController extends Controller
      * @param int $id - ID de la variante à supprimer
      * @return JsonResponse - Message de confirmation
      */
-    public function destroy(int $id): JsonResponse
+    public function destroy(int $productId, int $variantId): JsonResponse
     {
         try {
             // Récupérer la variante à supprimer
-            $variant = ProductVariant::with(['product'])->find($id);
+            $variant = ProductVariant::with(['product'])->find($variantId);
 
             // Vérifier si la variante existe
             if (!$variant) {
