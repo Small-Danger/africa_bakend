@@ -190,9 +190,14 @@ class ImageController extends Controller
                     // Déterminer le type de média
                     $mediaType = $this->determineMediaType($file);
                     
-                    // Uploader vers Cloudinary
+                    // Uploader vers Cloudinary selon le type
                     $folder = $mediaType === 'video' ? 'bs_shop/products/videos' : 'bs_shop/products/images';
-                    $uploadResult = $cloudinaryService->uploadImage($file, $folder);
+                    
+                    if ($mediaType === 'video') {
+                        $uploadResult = $cloudinaryService->uploadVideo($file, $folder);
+                    } else {
+                        $uploadResult = $cloudinaryService->uploadImage($file, $folder);
+                    }
                     
                     if (!$uploadResult['success']) {
                         $errors[] = "Erreur lors de l'upload de {$file->getClientOriginalName()}: " . $uploadResult['message'];

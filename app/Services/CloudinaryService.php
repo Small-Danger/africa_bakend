@@ -140,6 +140,56 @@ class CloudinaryService
     }
 
     /**
+     * Uploader une vidéo vers Cloudinary
+     *
+     * @param UploadedFile $file
+     * @param string $folder
+     * @param array $options
+     * @return array
+     */
+    public function uploadVideo(UploadedFile $file, string $folder = 'bs_shop', array $options = []): array
+    {
+        try {
+            $uploadOptions = array_merge([
+                'folder' => $folder,
+                'resource_type' => 'video',
+                'quality' => 'auto',
+                'fetch_format' => 'auto',
+                'transformation' => [
+                    'width' => 1920,
+                    'height' => 1080,
+                    'crop' => 'limit'
+                ]
+            ], $options);
+
+            $result = $this->cloudinary->uploadApi()->upload(
+                $file->getRealPath(),
+                $uploadOptions
+            );
+
+            return [
+                'success' => true,
+                'public_id' => $result['public_id'],
+                'secure_url' => $result['secure_url'],
+                'url' => $result['url'],
+                'width' => $result['width'],
+                'height' => $result['height'],
+                'format' => $result['format'],
+                'bytes' => $result['bytes'],
+                'duration' => $result['duration'] ?? null
+            ];
+
+        } catch (\Exception $e) {
+            Log::error('Cloudinary video upload error: ' . $e->getMessage());
+            
+            return [
+                'success' => false,
+                'error' => $e->getMessage()
+            ];
+        }
+    }
+
+    /**
      * Supprimer une image de Cloudinary
      *
      * @param string $publicId
