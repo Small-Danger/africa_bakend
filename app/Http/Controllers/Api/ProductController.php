@@ -101,7 +101,7 @@ class ProductController extends Controller
                     'slug' => $product->slug,
                     'description' => Str::limit($product->description, 150),
                     'base_price' => $product->base_price,
-                    'image_main' => $product->image_main ? asset('storage/' . $product->image_main) : null,
+                    'image_main' => $product->image_main,
                     'category' => [
                         'id' => $product->category->id,
                         'name' => $product->category->name,
@@ -589,7 +589,7 @@ class ProductController extends Controller
                 'slug' => $product->slug,
                 'description' => $product->description,
                 'base_price' => $product->base_price,
-                'image_main' => $product->image_main ? asset('storage/' . $product->image_main) : null,
+                'image_main' => $product->image_main,
                 'category' => [
                     'id' => $product->category->id,
                     'name' => $product->category->name,
