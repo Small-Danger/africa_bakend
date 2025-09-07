@@ -56,6 +56,15 @@ class ProductController extends Controller
                 });
             }
 
+            // Filtre par statut (actif/inactif)
+            if ($request->has('status') && $request->status) {
+                if ($request->status === 'active') {
+                    $query->where('is_active', true);
+                } elseif ($request->status === 'inactive') {
+                    $query->where('is_active', false);
+                }
+            }
+
             // Filtre par prix minimum
             if ($request->has('min_price') && $request->min_price) {
                 $query->where(function ($q) use ($request) {

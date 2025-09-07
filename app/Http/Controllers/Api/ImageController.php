@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\ProductImage;
+use App\Services\CloudinaryService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
@@ -52,7 +53,7 @@ class ImageController extends Controller
             $formattedImages = $images->map(function ($image) {
                 return [
                     'id' => $image->id,
-                    'media_path' => $image->media_path,
+                    'media_path' => $image->media_path, // URL Cloudinary complète
                     'alt_text' => $image->alt_text,
                     'title' => $image->title,
                     'sort_order' => $image->sort_order,
@@ -65,7 +66,7 @@ class ImageController extends Controller
             $formattedVideos = $videos->map(function ($video) {
                 return [
                     'id' => $video->id,
-                    'media_path' => asset('storage/' . $video->media_path),
+                    'media_path' => $video->media_path, // URL Cloudinary complète
                     'alt_text' => $video->alt_text,
                     'title' => $video->title,
                     'sort_order' => $video->sort_order,
@@ -181,23 +182,29 @@ class ImageController extends Controller
             $uploadedMedia = [];
             $errors = [];
 
-            // Traiter chaque fichier
+            // Traiter chaque fichier avec Cloudinary
+            $cloudinaryService = new CloudinaryService();
+            
             foreach ($mediaFiles as $index => $file) {
                 try {
                     // Déterminer le type de média
                     $mediaType = $this->determineMediaType($file);
                     
-                    // Générer un nom de fichier unique
-                    $fileName = 'product_' . $product_id . '_' . time() . '_' . Str::random(10) . '.' . $file->getClientOriginalExtension();
+                    // Uploader vers Cloudinary
+                    $folder = $mediaType === 'video' ? 'bs_shop/products/videos' : 'bs_shop/products/images';
+                    $uploadResult = $cloudinaryService->uploadImage($file, $folder);
                     
-                    // Stocker le fichier dans le dossier approprié
-                    $folder = $mediaType === 'video' ? 'videos' : 'images';
-                    $filePath = $file->storeAs("products/{$folder}", $fileName, 'public');
+                    if (!$uploadResult['success']) {
+                        $errors[] = "Erreur lors de l'upload de {$file->getClientOriginalName()}: " . $uploadResult['message'];
+                        continue;
+                    }
+                    
+                    $cloudinaryUrl = $uploadResult['secure_url'];
 
                     // Créer l'enregistrement en base de données
                     $media = ProductImage::create([
                         'product_id' => $product_id,
-                        'media_path' => $filePath,
+                        'media_path' => $cloudinaryUrl,
                         'media_type' => $mediaType,
                         'alt_text' => $altTexts[$index] ?? null,
                         'title' => $titles[$index] ?? null,
