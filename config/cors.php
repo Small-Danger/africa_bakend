@@ -23,7 +23,8 @@ return [
         'http://localhost:5173', 
         'http://localhost:3000', 
         'http://localhost:8080',
-        'https://africafrontend-production.up.railway.app'
+        'https://africafrontend-production.up.railway.app',
+        'https://*.up.railway.app'
     ],
 
     'allowed_origins_patterns' => [

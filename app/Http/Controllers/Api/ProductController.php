@@ -765,10 +765,13 @@ class ProductController extends Controller
     public function storeBatch(Request $request): JsonResponse
     {
         try {
+            // Augmenter les limites pour les gros volumes
+            ini_set('memory_limit', '512M');
+            ini_set('max_execution_time', 300);
             // Validation des données de création en masse
             $validator = Validator::make($request->all(), [
                 'category_id' => 'required|exists:categories,id',
-                'products' => 'required|array|min:1|max:50', // Limite de 50 produits par batch
+                'products' => 'required|array|min:1|max:100', // Limite de 100 produits par batch
                 'products.*.name' => 'required|string|max:255',
                 'products.*.description' => 'required|string',
                 'products.*.base_price' => 'required|numeric|min:0',
@@ -819,8 +822,13 @@ class ProductController extends Controller
                 $createdProducts = [];
                 $cloudinaryService = new CloudinaryService();
                 $sortOrder = 0;
+                
+                // Optimisation pour gros volumes : traiter par petits lots
+                $batchSize = 10;
+                $products = array_chunk($request->products, $batchSize);
 
-                foreach ($request->products as $productData) {
+                foreach ($products as $productBatch) {
+                    foreach ($productBatch as $productData) {
                     // Générer le slug unique à partir du nom
                     $slug = Str::slug($productData['name']);
                     $originalSlug = $slug;
@@ -868,7 +876,8 @@ class ProductController extends Controller
                         'created_at' => $product->created_at
                     ];
 
-                    $sortOrder++;
+                        $sortOrder++;
+                    }
                 }
 
                 // Valider la transaction
