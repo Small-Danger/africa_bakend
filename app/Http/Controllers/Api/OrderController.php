@@ -130,7 +130,7 @@ class OrderController extends Controller
                 $tempUser = User::create([
                     'name' => 'Client ' . substr($request->session_id, -6),
                     'email' => 'temp_' . time() . '@bs-shop.com',
-                    'whatsapp_phone' => '+33000000000', // Téléphone temporaire
+                    'whatsapp_phone' => '+22663126849', // Téléphone de contact
                     'role' => 'client',
                     'password' => bcrypt(Str::random(16)),
                     'is_active' => true
@@ -448,7 +448,7 @@ class OrderController extends Controller
                 $tempUser = User::create([
                     'name' => 'Client ' . substr($request->session_id, -6),
                     'email' => 'temp_' . time() . '@bs-shop.com',
-                    'whatsapp_phone' => '+33000000000', // Téléphone temporaire
+                    'whatsapp_phone' => '+22663126849', // Téléphone de contact
                     'role' => 'client',
                     'password' => bcrypt(Str::random(16)),
                     'is_active' => true
