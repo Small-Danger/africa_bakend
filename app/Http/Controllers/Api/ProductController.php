@@ -101,7 +101,7 @@ class ProductController extends Controller
                     'slug' => $product->slug,
                     'description' => Str::limit($product->description, 150),
                     'base_price' => $product->base_price,
-                    'image_main' => $product->image_main,
+                    'image_main' => $product->image_main ? asset('storage/' . $product->image_main) : null,
                     'category' => [
                         'id' => $product->category->id,
                         'name' => $product->category->name,
@@ -589,7 +589,7 @@ class ProductController extends Controller
                 'slug' => $product->slug,
                 'description' => $product->description,
                 'base_price' => $product->base_price,
-                'image_main' => $product->image_main,
+                'image_main' => $product->image_main ? asset('storage/' . $product->image_main) : null,
                 'category' => [
                     'id' => $product->category->id,
                     'name' => $product->category->name,
@@ -753,6 +753,156 @@ class ProductController extends Controller
             return true;
         } catch (\Exception $e) {
             return false;
+        }
+    }
+
+    /**
+     * Créer plusieurs produits en masse (ADMIN ONLY)
+     * 
+     * @param Request $request - Données des produits avec catégorie commune
+     * @return JsonResponse - Produits créés
+     */
+    public function storeBatch(Request $request): JsonResponse
+    {
+        try {
+            // Validation des données de création en masse
+            $validator = Validator::make($request->all(), [
+                'category_id' => 'required|exists:categories,id',
+                'products' => 'required|array|min:1|max:50', // Limite de 50 produits par batch
+                'products.*.name' => 'required|string|max:255',
+                'products.*.description' => 'required|string',
+                'products.*.base_price' => 'required|numeric|min:0',
+                'products.*.image_main' => 'required|string', // Image base64 obligatoire
+                'products.*.is_active' => 'nullable|boolean',
+                'products.*.sort_order' => 'nullable|integer|min:0'
+            ], [
+                'category_id.required' => 'La catégorie est obligatoire',
+                'category_id.exists' => 'La catégorie sélectionnée n\'existe pas',
+                'products.required' => 'Au moins un produit est requis',
+                'products.array' => 'Les produits doivent être un tableau',
+                'products.min' => 'Au moins un produit est requis',
+                'products.max' => 'Maximum 50 produits par création en masse',
+                'products.*.name.required' => 'Le nom du produit est obligatoire',
+                'products.*.name.max' => 'Le nom ne peut pas dépasser 255 caractères',
+                'products.*.description.required' => 'La description du produit est obligatoire',
+                'products.*.base_price.required' => 'Le prix de base est obligatoire',
+                'products.*.base_price.numeric' => 'Le prix de base doit être un nombre',
+                'products.*.base_price.min' => 'Le prix de base ne peut pas être négatif',
+                'products.*.image_main.required' => 'L\'image principale est obligatoire',
+                'products.*.is_active.boolean' => 'Le statut actif doit être vrai ou faux',
+                'products.*.sort_order.integer' => 'L\'ordre doit être un nombre entier',
+                'products.*.sort_order.min' => 'L\'ordre ne peut pas être négatif'
+            ]);
+
+            // Si validation échoue, retourner les erreurs
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Erreur de validation',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Vérifier que la catégorie existe et est active
+            $category = Category::find($request->category_id);
+            if (!$category || !$category->is_active) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'La catégorie sélectionnée n\'est pas disponible'
+                ], 422);
+            }
+
+            // Démarrer une transaction pour garantir l'intégrité
+            \DB::beginTransaction();
+
+            try {
+                $createdProducts = [];
+                $cloudinaryService = new CloudinaryService();
+                $sortOrder = 0;
+
+                foreach ($request->products as $productData) {
+                    // Générer le slug unique à partir du nom
+                    $slug = Str::slug($productData['name']);
+                    $originalSlug = $slug;
+                    $counter = 1;
+
+                    // Vérifier l'unicité du slug
+                    while (Product::where('slug', $slug)->exists()) {
+                        $slug = $originalSlug . '-' . $counter;
+                        $counter++;
+                    }
+
+                    // Uploader l'image vers Cloudinary
+                    $imageUrl = null;
+                    if (isset($productData['image_main']) && $productData['image_main']) {
+                        $uploadResult = $cloudinaryService->uploadBase64Image($productData['image_main'], 'bs_shop/products');
+                        if ($uploadResult['success']) {
+                            $imageUrl = $uploadResult['secure_url'];
+                        } else {
+                            throw new \Exception('Erreur lors de l\'upload de l\'image pour le produit: ' . $productData['name']);
+                        }
+                    }
+
+                    // Créer le produit
+                    $product = Product::create([
+                        'name' => $productData['name'],
+                        'slug' => $slug,
+                        'description' => $productData['description'],
+                        'base_price' => $productData['base_price'],
+                        'category_id' => $request->category_id,
+                        'image_main' => $imageUrl,
+                        'sort_order' => $productData['sort_order'] ?? $sortOrder,
+                        'is_active' => $productData['is_active'] ?? true
+                    ]);
+
+                    $createdProducts[] = [
+                        'id' => $product->id,
+                        'name' => $product->name,
+                        'slug' => $product->slug,
+                        'description' => $product->description,
+                        'base_price' => $product->base_price,
+                        'image_main' => $product->image_main,
+                        'category_id' => $product->category_id,
+                        'sort_order' => $product->sort_order,
+                        'is_active' => $product->is_active,
+                        'created_at' => $product->created_at
+                    ];
+
+                    $sortOrder++;
+                }
+
+                // Valider la transaction
+                \DB::commit();
+
+                // Invalider le cache des produits
+                Cache::forget('products_index_' . md5(serialize([])));
+
+                return response()->json([
+                    'success' => true,
+                    'message' => count($createdProducts) . ' produit(s) créé(s) avec succès',
+                    'data' => [
+                        'products' => $createdProducts,
+                        'count' => count($createdProducts),
+                        'category' => [
+                            'id' => $category->id,
+                            'name' => $category->name,
+                            'slug' => $category->slug
+                        ]
+                    ]
+                ], 201);
+
+            } catch (\Exception $e) {
+                // Annuler la transaction en cas d'erreur
+                \DB::rollback();
+                throw $e;
+            }
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la création en masse des produits',
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
 

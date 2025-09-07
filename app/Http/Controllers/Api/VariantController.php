@@ -331,6 +331,133 @@ class VariantController extends Controller
     }
 
     /**
+     * Créer plusieurs variantes en batch (ADMIN ONLY)
+     * 
+     * @param Request $request - Données des variantes
+     * @param int $product_id - ID du produit
+     * @return JsonResponse - Variantes créées
+     */
+    public function storeBatch(Request $request, int $product_id): JsonResponse
+    {
+        try {
+            // Récupérer le produit parent
+            $product = Product::find($product_id);
+
+            // Vérifier si le produit existe
+            if (!$product) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Produit non trouvé'
+                ], 404);
+            }
+
+            // Vérifier si le produit est actif
+            if (!$product->is_active) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Ce produit n\'est pas disponible'
+                ], 403);
+            }
+
+            // Validation des données de création en batch
+            $validator = Validator::make($request->all(), [
+                'variants' => 'required|array|min:1',
+                'variants.*.name' => 'required|string|max:255',
+                'variants.*.sku' => 'nullable|string|max:100|unique:product_variants,sku',
+                'variants.*.price' => 'required|numeric|min:0',
+                'variants.*.stock_quantity' => 'nullable|integer|min:0',
+                'variants.*.sort_order' => 'nullable|integer|min:0',
+                'variants.*.is_active' => 'nullable|boolean'
+            ], [
+                'variants.required' => 'Au moins une variante est requise',
+                'variants.array' => 'Les variantes doivent être un tableau',
+                'variants.min' => 'Au moins une variante est requise',
+                'variants.*.name.required' => 'Le nom de chaque variante est obligatoire',
+                'variants.*.name.max' => 'Le nom ne peut pas dépasser 255 caractères',
+                'variants.*.sku.max' => 'Le SKU ne peut pas dépasser 100 caractères',
+                'variants.*.sku.unique' => 'Ce SKU est déjà utilisé',
+                'variants.*.price.required' => 'Le prix de chaque variante est obligatoire',
+                'variants.*.price.numeric' => 'Le prix doit être un nombre',
+                'variants.*.price.min' => 'Le prix ne peut pas être négatif',
+                'variants.*.stock_quantity.integer' => 'La quantité en stock doit être un nombre entier',
+                'variants.*.stock_quantity.min' => 'La quantité en stock ne peut pas être négative',
+                'variants.*.sort_order.integer' => 'L\'ordre doit être un nombre entier',
+                'variants.*.sort_order.min' => 'L\'ordre ne peut pas être négatif'
+            ]);
+
+            // Si validation échoue, retourner les erreurs
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Erreur de validation',
+                    'errors' => $validator->errors()
+                ], 422);
+            }
+
+            // Démarrer une transaction
+            \DB::beginTransaction();
+
+            try {
+                $createdVariants = [];
+                $variants = $request->variants;
+
+                foreach ($variants as $index => $variantData) {
+                    // Créer la variante
+                    $variant = new ProductVariant();
+                    $variant->product_id = $product_id;
+                    $variant->name = $variantData['name'];
+                    $variant->sku = $variantData['sku'] ?? null;
+                    $variant->price = $variantData['price'];
+                    $variant->stock_quantity = $variantData['stock_quantity'] ?? null;
+                    $variant->sort_order = $variantData['sort_order'] ?? 0;
+                    $variant->is_active = $variantData['is_active'] ?? true;
+                    $variant->save();
+
+                    // Formater la variante créée
+                    $formattedVariant = [
+                        'id' => $variant->id,
+                        'name' => $variant->name,
+                        'sku' => $variant->sku,
+                        'price' => $variant->price,
+                        'stock_quantity' => $variant->stock_quantity,
+                        'is_active' => $variant->is_active,
+                        'sort_order' => $variant->sort_order,
+                        'created_at' => $variant->created_at,
+                        'updated_at' => $variant->updated_at
+                    ];
+
+                    $createdVariants[] = $formattedVariant;
+                }
+
+                // Valider la transaction
+                \DB::commit();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => count($createdVariants) . ' variante(s) créée(s) avec succès',
+                    'data' => [
+                        'variants' => $createdVariants,
+                        'count' => count($createdVariants)
+                    ]
+                ], 201);
+
+            } catch (\Exception $e) {
+                // Annuler la transaction en cas d'erreur
+                \DB::rollback();
+                throw $e;
+            }
+
+        } catch (\Exception $e) {
+            \Log::error('Erreur lors de la création en batch des variantes: ' . $e->getMessage());
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la création des variantes',
+                'error' => 'Une erreur est survenue'
+            ], 500);
+        }
+    }
+
+    /**
      * Modifier une variante existante (ADMIN ONLY)
      * 
      * @param Request $request - Nouvelles données de la variante
