@@ -24,7 +24,9 @@ return [
         'http://localhost:3000', 
         'http://localhost:8080',
         'https://africafrontend-production.up.railway.app',
-        'https://*.up.railway.app'
+        'https://*.up.railway.app',
+        'https://afrikraga.com',
+        'https://www.afrikraga.com'
     ],
 
     'allowed_origins_patterns' => [
