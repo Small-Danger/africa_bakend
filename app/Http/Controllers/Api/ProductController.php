@@ -162,6 +162,142 @@ class ProductController extends Controller
     }
 
     /**
+     * Liste des produits pour l'admin (tous les produits, actifs et inactifs)
+     * 
+     * @param Request $request - Requête avec filtres optionnels
+     * @return JsonResponse - Liste des produits filtrés et paginés
+     */
+    public function adminIndex(Request $request): JsonResponse
+    {
+        try {
+            // Construire la requête de base - SANS filtre is_active pour l'admin
+            $query = Product::with(['category' => function ($categoryQuery) {
+                    $categoryQuery->with('parent'); // Charger aussi la catégorie parente
+                }, 'variants' => function ($variantQuery) {
+                    $variantQuery->where('is_active', true);
+                }]);
+
+            // Filtre par catégorie principale
+            if ($request->has('category_id') && $request->category_id) {
+                $query->where('category_id', $request->category_id);
+            }
+
+            // Filtre par sous-catégorie (catégories enfants)
+            if ($request->has('subcategory_id') && $request->subcategory_id) {
+                $query->where('category_id', $request->subcategory_id);
+            }
+
+            // Filtre par mot-clé (recherche dans le nom et la description)
+            if ($request->has('search') && $request->search) {
+                $searchTerm = $request->search;
+                $query->where(function ($q) use ($searchTerm) {
+                    $q->where('name', 'LIKE', "%{$searchTerm}%")
+                      ->orWhere('description', 'LIKE', "%{$searchTerm}%");
+                });
+            }
+
+            // Filtre par statut (actif/inactif) - pour l'admin, on peut filtrer
+            if ($request->has('status') && $request->status) {
+                if ($request->status === 'active') {
+                    $query->where('is_active', true);
+                } elseif ($request->status === 'inactive') {
+                    $query->where('is_active', false);
+                }
+            }
+
+            // Filtre par prix minimum
+            if ($request->has('min_price') && $request->min_price) {
+                $query->where(function ($q) use ($request) {
+                    $q->where('base_price', '>=', $request->min_price)
+                      ->orWhereHas('variants', function ($variantQ) use ($request) {
+                          $variantQ->where('price', '>=', $request->min_price);
+                      });
+                });
+            }
+
+            // Filtre par prix maximum
+            if ($request->has('max_price') && $request->max_price) {
+                $query->where(function ($q) use ($request) {
+                    $q->where('base_price', '<=', $request->max_price)
+                      ->orWhereHas('variants', function ($variantQ) use ($request) {
+                          $variantQ->where('price', '<=', $request->max_price);
+                      });
+                });
+            }
+
+            // Tri des produits
+            $sortBy = $request->get('sort_by', 'created_at');
+            $sortOrder = $request->get('sort_order', 'desc');
+            
+            if ($sortBy === 'price') {
+                $query->orderBy('base_price', $sortOrder);
+            } elseif ($sortBy === 'name') {
+                $query->orderBy('name', $sortOrder);
+            } elseif ($sortBy === 'created_at') {
+                $query->orderBy('created_at', $sortOrder);
+            } else {
+                $query->orderBy('created_at', 'desc');
+            }
+
+            // Pagination - plus de produits par page pour l'admin
+            $perPage = $request->get('per_page', 50);
+            $products = $query->paginate($perPage);
+
+            // Formater les données des produits pour l'admin
+            $formattedProducts = $products->getCollection()->map(function ($product) {
+                return [
+                    'id' => $product->id,
+                    'name' => $product->name,
+                    'slug' => $product->slug,
+                    'description' => $product->description,
+                    'base_price' => $product->base_price,
+                    'image_main' => $product->image_main,
+                    'is_active' => $product->is_active,
+                    'category' => [
+                        'id' => $product->category->id,
+                        'name' => $product->category->name,
+                        'slug' => $product->category->slug,
+                        'is_main' => $product->category->isMain(),
+                        'is_subcategory' => $product->category->isSubcategory(),
+                        'parent' => $product->category->parent ? [
+                            'id' => $product->category->parent->id,
+                            'name' => $product->category->parent->name,
+                            'slug' => $product->category->parent->slug
+                        ] : null
+                    ],
+                    'has_variants' => $product->hasVariants(),
+                    'variants_count' => $product->variants->count(),
+                    'min_price' => $product->variants->count() > 0 ? $product->variants->min('price') : $product->base_price,
+                    'max_price' => $product->variants->count() > 0 ? $product->variants->max('price') : $product->base_price,
+                    'sort_order' => $product->sort_order,
+                    'created_at' => $product->created_at,
+                    'updated_at' => $product->updated_at
+                ];
+            });
+
+            // Retourner la réponse avec pagination Laravel standard
+            return response()->json([
+                'success' => true,
+                'message' => 'Produits récupérés avec succès',
+                'data' => $formattedProducts,
+                'current_page' => $products->currentPage(),
+                'last_page' => $products->lastPage(),
+                'per_page' => $products->perPage(),
+                'total' => $products->total(),
+                'from' => $products->firstItem(),
+                'to' => $products->lastItem()
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la récupération des produits',
+                'error' => 'Une erreur est survenue'
+            ], 500);
+        }
+    }
+
+    /**
      * Afficher un produit spécifique avec ses variantes et images
      * 
      * @param int $id - ID du produit

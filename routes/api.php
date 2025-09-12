@@ -105,6 +105,7 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
     Route::post('/categories/{id}/image', [CategoryController::class, 'uploadImage']);
     
     // Gestion des produits
+    Route::get('/products', [ProductController::class, 'adminIndex']); // Liste des produits pour l'admin
     Route::post('/products', [ProductController::class, 'store']);
     Route::post('/products/batch', [ProductController::class, 'storeBatch']); // Création en masse
     Route::put('/products/{id}', [ProductController::class, 'update']);
