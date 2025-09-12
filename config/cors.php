@@ -26,7 +26,8 @@ return [
         'https://africafrontend-production.up.railway.app',
         'https://*.up.railway.app',
         'https://afrikraga.com',
-        'https://www.afrikraga.com'
+        'https://www.afrikraga.com',
+        'https://api.afrikraga.com'
     ],
 
     'allowed_origins_patterns' => [
