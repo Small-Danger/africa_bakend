@@ -51,6 +51,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Cookie Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configure the cookie settings for Sanctum to work with cross-domain
+    | requests between your frontend and backend.
+    |
+    */
+
+    'cookie' => [
+        'name' => env('SANCTUM_COOKIE_NAME', 'afrikraga_session'),
+        'domain' => env('SANCTUM_COOKIE_DOMAIN', '.afrikraga.com'),
+        'secure' => env('SANCTUM_COOKIE_SECURE', true),
+        'http_only' => env('SANCTUM_COOKIE_HTTP_ONLY', true),
+        'same_site' => env('SANCTUM_COOKIE_SAME_SITE', 'none'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Token Prefix
     |--------------------------------------------------------------------------
     |

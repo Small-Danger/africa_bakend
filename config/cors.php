@@ -45,4 +45,6 @@ return [
 
     'supports_credentials' => true,
 
+    'allowed_credentials' => true,
+
 ];
