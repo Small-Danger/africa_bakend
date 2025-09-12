@@ -35,6 +35,11 @@ class CategoryController extends Controller
                 ->get();
 
             \Log::info('Catégories récupérées:', ['count' => $categories->count()]);
+            
+            // Debug des statuts
+            foreach ($categories as $cat) {
+                \Log::info("Catégorie '{$cat->name}': is_active = " . ($cat->is_active ? 'true' : 'false') . " (type: " . gettype($cat->is_active) . ")");
+            }
 
             // Formater les données pour inclure les URLs des images
             $formattedCategories = $categories->map(function ($category) {
@@ -44,10 +49,12 @@ class CategoryController extends Controller
                     'slug' => $category->slug,
                     'description' => $category->description,
                     'image_main' => $category->image_main && str_starts_with($category->image_main, 'http') ? $category->image_main : null,
-                    'is_active' => $category->is_active, // Inclure le statut actif
+                    'is_active' => (bool) $category->is_active, // Inclure le statut actif (forcé en booléen)
                     'has_subcategories' => $category->children->count() > 0,
                     'subcategories_count' => $category->children->count(),
-                    'products_count' => $category->products()->count(),
+                    'products_count' => $category->children->sum(function ($subcategory) {
+                        return $subcategory->products()->count();
+                    }),
                     'subcategories' => $category->children->map(function ($subcategory) {
                         return [
                             'id' => $subcategory->id,
@@ -451,13 +458,14 @@ class CategoryController extends Controller
             $validator = Validator::make($request->all(), [
                 'name' => 'sometimes|string|max:255',
                 'description' => 'sometimes|string',
-                'parent_id' => 'sometimes|exists:categories,id',
+                'parent_id' => 'sometimes|nullable|integer|exists:categories,id',
                 'image_main' => 'sometimes|string', // Image en base64
                 'sort_order' => 'sometimes|integer|min:0',
                 'is_active' => 'sometimes|boolean'
             ], [
                 'name.max' => 'Le nom ne peut pas dépasser 255 caractères',
                 'parent_id.exists' => 'La catégorie parente sélectionnée n\'existe pas',
+                'parent_id.integer' => 'L\'ID de la catégorie parente doit être un nombre',
                 'sort_order.integer' => 'L\'ordre doit être un nombre entier',
                 'sort_order.min' => 'L\'ordre ne peut pas être négatif'
             ]);

@@ -26,6 +26,8 @@ return Application::configure(basePath: dirname(__DIR__))
         
         // Ajouter la session aux routes API pour l'authentification admin
         $middleware->api(prepend: [
+            \Illuminate\Cookie\Middleware\EncryptCookies::class,
+            \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
             \Illuminate\Session\Middleware\StartSession::class,
         ]);
         
