@@ -24,6 +24,11 @@ return Application::configure(basePath: dirname(__DIR__))
             'sanctum/*'
         ]);
         
+        // Ajouter la session aux routes API pour l'authentification admin
+        $middleware->api(prepend: [
+            \Illuminate\Session\Middleware\StartSession::class,
+        ]);
+        
         $middleware->web(prepend: [
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
         ]);
