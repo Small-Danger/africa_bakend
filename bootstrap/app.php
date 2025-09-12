@@ -18,15 +18,10 @@ return Application::configure(basePath: dirname(__DIR__))
             'large.upload' => \App\Http\Middleware\LargeFileUpload::class,
         ]);
         
-        // Configuration CSRF sécurisée pour les domaines personnalisés
+        // Désactiver CSRF pour toutes les routes API (solution simple)
         $middleware->validateCsrfTokens(except: [
-            'api/auth/*',  // Seulement les routes d'authentification
-            'sanctum/csrf-cookie'
-        ]);
-
-        // Ajouter le middleware CORS globalement
-        $middleware->api(prepend: [
-            \App\Http\Middleware\DisableCsrfForCustomDomains::class,
+            'api/*',
+            'sanctum/*'
         ]);
         
         $middleware->web(prepend: [
