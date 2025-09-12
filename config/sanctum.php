@@ -16,7 +16,7 @@ return [
     */
 
     'stateful' => explode(',', env('SANCTUM_STATEFUL_DOMAINS', 
-        'localhost,localhost:3000,127.0.0.1,127.0.0.1:8000,::1,afrikraga.com,www.afrikraga.com,api.afrikraga.com,africafrontend-production.up.railway.app,web-production-7228.up.railway.app'
+        'localhost,localhost:3000,127.0.0.1,127.0.0.1:8000,::1,afrikraga.com,www.afrikraga.com,api.afrikraga.com'
     )),
 
     /*

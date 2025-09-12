@@ -23,8 +23,6 @@ return [
         'http://localhost:5173', 
         'http://localhost:3000', 
         'http://localhost:8080',
-        'https://africafrontend-production.up.railway.app',
-        'https://*.up.railway.app',
         'https://afrikraga.com',
         'https://www.afrikraga.com',
         'https://api.afrikraga.com'
@@ -33,8 +31,7 @@ return [
     'allowed_origins_patterns' => [
         'http://192.168.11.*:5173',
         'http://192.168.11.*:3000',
-        'http://192.168.11.*:8080',
-        'https://*.up.railway.app'
+        'http://192.168.11.*:8080'
     ],
 
     'allowed_headers' => ['*'],

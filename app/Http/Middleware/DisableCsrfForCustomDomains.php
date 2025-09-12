@@ -17,18 +17,41 @@ class DisableCsrfForCustomDomains extends VerifyCsrfToken
      */
     public function handle($request, Closure $next)
     {
-        // Désactiver CSRF pour les domaines personnalisés
-        if (in_array($request->getHost(), [
+        // Vérifier si c'est un domaine personnalisé
+        $isCustomDomain = in_array($request->getHost(), [
             'api.afrikraga.com',
             'afrikraga.com', 
-            'www.afrikraga.com',
-            'africafrontend-production.up.railway.app',
-            'web-production-7228.up.railway.app'
-        ])) {
-            return $next($request);
+            'www.afrikraga.com'
+        ]);
+
+        // Pour les domaines personnalisés, vérifier CSRF seulement pour les routes sensibles
+        if ($isCustomDomain) {
+            // Routes qui nécessitent CSRF même sur les domaines personnalisés
+            $csrfRequiredRoutes = [
+                'api/admin/*',
+                'api/products/*',
+                'api/categories/*',
+                'api/banners/*',
+                'api/orders/*'
+            ];
+
+            $currentPath = $request->path();
+            $needsCsrf = false;
+
+            foreach ($csrfRequiredRoutes as $route) {
+                if (fnmatch($route, $currentPath)) {
+                    $needsCsrf = true;
+                    break;
+                }
+            }
+
+            // Si CSRF n'est pas requis, passer directement
+            if (!$needsCsrf) {
+                return $next($request);
+            }
         }
         
-        // Utiliser la vérification CSRF normale pour les autres domaines
+        // Utiliser la vérification CSRF normale pour les autres cas
         return parent::handle($request, $next);
     }
 }
