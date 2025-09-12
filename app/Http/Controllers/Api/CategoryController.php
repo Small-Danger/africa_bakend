@@ -26,6 +26,10 @@ class CategoryController extends Controller
             \Log::info('=== INDEX ADMIN DEBUG ===');
             \Log::info('Début de la méthode indexAdmin');
             
+            // Vider le cache pour forcer le rechargement
+            \Artisan::call('config:clear');
+            \Artisan::call('cache:clear');
+            
             // Récupérer toutes les catégories (y compris inactives) avec leurs relations
             $categories = Category::with(['children' => function ($query) {
                     $query->orderBy('sort_order');
@@ -43,6 +47,12 @@ class CategoryController extends Controller
 
             // Formater les données pour inclure les URLs des images
             $formattedCategories = $categories->map(function ($category) {
+                $productsCount = $category->children->sum(function ($subcategory) {
+                    return $subcategory->products()->count();
+                });
+                
+                \Log::info("Catégorie '{$category->name}': is_active = " . ($category->is_active ? 'true' : 'false') . ", products_count = {$productsCount}");
+                
                 return [
                     'id' => $category->id,
                     'name' => $category->name,
@@ -52,9 +62,7 @@ class CategoryController extends Controller
                     'is_active' => (bool) $category->is_active, // Inclure le statut actif (forcé en booléen)
                     'has_subcategories' => $category->children->count() > 0,
                     'subcategories_count' => $category->children->count(),
-                    'products_count' => $category->children->sum(function ($subcategory) {
-                        return $subcategory->products()->count();
-                    }),
+                    'products_count' => $productsCount,
                     'subcategories' => $category->children->map(function ($subcategory) {
                         return [
                             'id' => $subcategory->id,
