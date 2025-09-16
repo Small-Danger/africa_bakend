@@ -922,7 +922,15 @@ class ProductController extends Controller
                 'products.*.base_price' => 'required|numeric|min:0',
                 'products.*.image_main' => 'required|string', // Image base64 obligatoire
                 'products.*.is_active' => 'nullable|boolean',
-                'products.*.sort_order' => 'nullable|integer|min:0'
+                'products.*.sort_order' => 'nullable|integer|min:0',
+                // Validation des variantes (optionnelles)
+                'products.*.variants' => 'nullable|array',
+                'products.*.variants.*.name' => 'required_with:products.*.variants|string|max:255',
+                'products.*.variants.*.price' => 'required_with:products.*.variants|numeric|min:0',
+                'products.*.variants.*.sku' => 'nullable|string|max:100',
+                'products.*.variants.*.stock_quantity' => 'nullable|integer|min:0',
+                'products.*.variants.*.is_active' => 'nullable|boolean',
+                'products.*.variants.*.sort_order' => 'nullable|integer|min:0'
             ], [
                 'category_id.required' => 'La catégorie est obligatoire',
                 'category_id.exists' => 'La catégorie sélectionnée n\'existe pas',
@@ -1008,6 +1016,33 @@ class ProductController extends Controller
                         'is_active' => $productData['is_active'] ?? true
                     ]);
 
+                    // Créer les variantes si elles existent
+                    $createdVariants = [];
+                    \Log::info('Données du produit reçues:', ['product' => $productData]);
+                    if (isset($productData['variants']) && is_array($productData['variants'])) {
+                        \Log::info('Variantes trouvées pour le produit:', ['variants' => $productData['variants']]);
+                        foreach ($productData['variants'] as $variantData) {
+                            $variant = $product->variants()->create([
+                                'name' => $variantData['name'],
+                                'price' => $variantData['price'],
+                                'sku' => $variantData['sku'] ?? null,
+                                'stock_quantity' => $variantData['stock_quantity'] ?? 0,
+                                'is_active' => $variantData['is_active'] ?? true,
+                                'sort_order' => $variantData['sort_order'] ?? 0
+                            ]);
+                            
+                            $createdVariants[] = [
+                                'id' => $variant->id,
+                                'name' => $variant->name,
+                                'price' => $variant->price,
+                                'sku' => $variant->sku,
+                                'stock_quantity' => $variant->stock_quantity,
+                                'is_active' => $variant->is_active,
+                                'sort_order' => $variant->sort_order
+                            ];
+                        }
+                    }
+
                     $createdProducts[] = [
                         'id' => $product->id,
                         'name' => $product->name,
@@ -1018,7 +1053,8 @@ class ProductController extends Controller
                         'category_id' => $product->category_id,
                         'sort_order' => $product->sort_order,
                         'is_active' => $product->is_active,
-                        'created_at' => $product->created_at
+                        'created_at' => $product->created_at,
+                        'variants' => $createdVariants
                     ];
 
                         $sortOrder++;
