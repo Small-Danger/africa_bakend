@@ -1019,7 +1019,7 @@ class ProductController extends Controller
                     // Créer les variantes si elles existent
                     $createdVariants = [];
                     \Log::info('Données du produit reçues:', ['product' => $productData]);
-                    if (isset($productData['variants']) && is_array($productData['variants'])) {
+                    if (isset($productData['variants']) && is_array($productData['variants']) && count($productData['variants']) > 0) {
                         \Log::info('Variantes trouvées pour le produit:', ['variants' => $productData['variants']]);
                         foreach ($productData['variants'] as $variantData) {
                             $variant = $product->variants()->create([
@@ -1043,7 +1043,7 @@ class ProductController extends Controller
                         }
                     }
 
-                    $createdProducts[] = [
+                    $productResponse = [
                         'id' => $product->id,
                         'name' => $product->name,
                         'slug' => $product->slug,
@@ -1056,6 +1056,9 @@ class ProductController extends Controller
                         'created_at' => $product->created_at,
                         'variants' => $createdVariants
                     ];
+                    
+                    \Log::info('Produit créé avec variantes:', ['product' => $productResponse]);
+                    $createdProducts[] = $productResponse;
 
                         $sortOrder++;
                     }
