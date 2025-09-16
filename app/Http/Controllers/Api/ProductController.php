@@ -370,6 +370,7 @@ class ProductController extends Controller
                         'sku' => $variant->sku,
                         'price' => $variant->price,
                         'stock_quantity' => $variant->stock_quantity,
+                        'is_active' => $variant->is_active,
                         'is_available' => $variant->isAvailable(),
                         'sort_order' => $variant->sort_order
                     ];

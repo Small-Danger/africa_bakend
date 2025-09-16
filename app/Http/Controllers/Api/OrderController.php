@@ -177,8 +177,8 @@ class OrderController extends Controller
                         'total_price' => $totalPrice
                     ]);
 
-                    // Mettre à jour le stock si c'est une variante
-                    if ($cartItem->variant && $cartItem->variant->stock_quantity !== null) {
+                    // Mettre à jour le stock si c'est une variante (seulement si stock limité)
+                    if ($cartItem->variant && $cartItem->variant->stock_quantity !== null && $cartItem->variant->stock_quantity > 0) {
                         $cartItem->variant->decrement('stock_quantity', $cartItem->quantity);
                     }
                 }
@@ -493,8 +493,8 @@ class OrderController extends Controller
                         'total_price' => $totalPrice
                     ]);
 
-                    // Mettre à jour le stock si c'est une variante
-                    if ($cartItem->variant && $cartItem->variant->stock_quantity !== null) {
+                    // Mettre à jour le stock si c'est une variante (seulement si stock limité)
+                    if ($cartItem->variant && $cartItem->variant->stock_quantity !== null && $cartItem->variant->stock_quantity > 0) {
                         $cartItem->variant->decrement('stock_quantity', $cartItem->quantity);
                     }
                 }

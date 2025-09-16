@@ -73,7 +73,8 @@ class ProductVariant extends Model
         if (is_null($this->stock_quantity)) {
             return true; // Stock illimité
         }
-        return $this->stock_quantity > 0;
+        // 0 signifie stock illimité, > 0 signifie stock limité
+        return $this->stock_quantity >= 0;
     }
 
     // Méthode pour obtenir le nom formaté avec SKU
