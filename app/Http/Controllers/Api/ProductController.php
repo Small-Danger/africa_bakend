@@ -934,7 +934,9 @@ class ProductController extends Controller
                 'products.*.variants.*.sku' => 'nullable|string|max:100',
                 'products.*.variants.*.stock_quantity' => 'nullable|integer|min:0',
                 'products.*.variants.*.is_active' => 'nullable|boolean',
-                'products.*.variants.*.sort_order' => 'nullable|integer|min:0'
+                'products.*.variants.*.sort_order' => 'nullable|integer|min:0',
+                // Limite de variantes par produit
+                'products.*.variants' => 'max:5' // Maximum 5 variantes par produit
             ], [
                 'category_id.required' => 'La catégorie est obligatoire',
                 'category_id.exists' => 'La catégorie sélectionnée n\'existe pas',
@@ -951,7 +953,8 @@ class ProductController extends Controller
                 'products.*.image_main.required' => 'L\'image principale est obligatoire',
                 'products.*.is_active.boolean' => 'Le statut actif doit être vrai ou faux',
                 'products.*.sort_order.integer' => 'L\'ordre doit être un nombre entier',
-                'products.*.sort_order.min' => 'L\'ordre ne peut pas être négatif'
+                'products.*.sort_order.min' => 'L\'ordre ne peut pas être négatif',
+                'products.*.variants.max' => 'Maximum 5 variantes par produit'
             ]);
 
             // Si validation échoue, retourner les erreurs
@@ -981,7 +984,7 @@ class ProductController extends Controller
                 $sortOrder = 0;
                 
                 // Optimisation pour gros volumes : traiter par petits lots
-                $batchSize = 5; // Réduit à 5 pour éviter la surcharge
+                $batchSize = 3; // Réduit à 3 pour éviter la surcharge avec variantes
                 $products = array_chunk($request->products, $batchSize);
 
                 foreach ($products as $productBatch) {
@@ -1031,31 +1034,40 @@ class ProductController extends Controller
                         'is_active' => $productData['is_active'] ?? true
                     ]);
 
-                    // Créer les variantes si elles existent
+                    // Créer les variantes si elles existent - Optimisé pour gros volumes
                     $createdVariants = [];
                     \Log::info('Données du produit reçues:', ['product' => $productData]);
                     if (isset($productData['variants']) && is_array($productData['variants']) && count($productData['variants']) > 0) {
                         \Log::info('Variantes trouvées pour le produit:', ['variants' => $productData['variants']]);
-                        foreach ($productData['variants'] as $variantData) {
-                            $variant = $product->variants()->create([
+                        
+                        // Préparer les données des variantes pour insertion en masse
+                        $variantsToInsert = [];
+                        foreach ($productData['variants'] as $index => $variantData) {
+                            $variantsToInsert[] = [
+                                'product_id' => $product->id,
                                 'name' => $variantData['name'],
                                 'price' => $variantData['price'],
                                 'sku' => $variantData['sku'] ?? null,
                                 'stock_quantity' => $variantData['stock_quantity'] ?? 0,
                                 'is_active' => $variantData['is_active'] ?? true,
-                                'sort_order' => $variantData['sort_order'] ?? 0
-                            ]);
-                            
-                            $createdVariants[] = [
-                                'id' => $variant->id,
-                                'name' => $variant->name,
-                                'price' => $variant->price,
-                                'sku' => $variant->sku,
-                                'stock_quantity' => $variant->stock_quantity,
-                                'is_active' => $variant->is_active,
-                                'sort_order' => $variant->sort_order
+                                'sort_order' => $variantData['sort_order'] ?? $index,
+                                'created_at' => now(),
+                                'updated_at' => now()
                             ];
                         }
+                        
+                        // Insertion en masse des variantes
+                        \DB::table('product_variants')->insert($variantsToInsert);
+                        
+                        // Récupérer les variantes créées pour la réponse
+                        $createdVariants = \DB::table('product_variants')
+                            ->where('product_id', $product->id)
+                            ->select('id', 'name', 'price', 'sku', 'stock_quantity', 'is_active', 'sort_order')
+                            ->get()
+                            ->toArray();
+                            
+                        // Libérer la mémoire des données de variantes
+                        unset($variantsToInsert);
                     }
 
                     $productResponse = [
