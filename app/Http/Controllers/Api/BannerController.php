@@ -27,7 +27,7 @@ class BannerController extends Controller
     }
 
     /**
-     * Liste des bannières actives (côté public)
+     * Liste des bannières actives (côté public )
      * 
      * @return JsonResponse - Liste des bannières actives triées par position
      */
