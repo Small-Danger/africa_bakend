@@ -650,28 +650,34 @@ class ProductController extends Controller
                 }
             }
 
-            // Traitement de la nouvelle image principale
-            $oldImagePath = $product->image_main;
-            $imagePath = $oldImagePath;
+            // Traitement de la nouvelle image principale avec Cloudinary
+            $oldImageUrl = $product->image_main;
+            $imageUrl = $oldImageUrl;
+            $cloudinaryService = new CloudinaryService();
 
             // Vérifier si c'est une image base64
             if ($request->has('image_main') && $request->image_main && is_string($request->image_main)) {
-                $imagePath = $this->saveBase64Image($request->image_main, 'products');
-                
-                // Supprimer l'ancienne image si elle existe
-                if ($oldImagePath && Storage::disk('public')->exists($oldImagePath)) {
-                    Storage::disk('public')->delete($oldImagePath);
+                $uploadResult = $cloudinaryService->uploadBase64Image($request->image_main, 'bs_shop/products');
+                if ($uploadResult['success']) {
+                    $imageUrl = $uploadResult['secure_url'];
+                    
+                    // Supprimer l'ancienne image de Cloudinary si elle existe
+                    if ($oldImageUrl) {
+                        $cloudinaryService->deleteImage($oldImageUrl);
+                    }
                 }
             }
             // Vérifier si c'est un fichier uploadé (compatibilité FormData)
             elseif ($request->hasFile('image_main_file')) {
                 $image = $request->file('image_main_file');
-                $fileName = 'product_' . time() . '_' . Str::random(10) . '.' . $image->getClientOriginalExtension();
-                $imagePath = $image->storeAs('products', $fileName, 'public');
-                
-                // Supprimer l'ancienne image si elle existe
-                if ($oldImagePath && Storage::disk('public')->exists($oldImagePath)) {
-                    Storage::disk('public')->delete($oldImagePath);
+                $uploadResult = $cloudinaryService->uploadImage($image, 'bs_shop/products');
+                if ($uploadResult['success']) {
+                    $imageUrl = $uploadResult['secure_url'];
+                    
+                    // Supprimer l'ancienne image de Cloudinary si elle existe
+                    if ($oldImageUrl) {
+                        $cloudinaryService->deleteImage($oldImageUrl);
+                    }
                 }
             }
 
@@ -711,7 +717,7 @@ class ProductController extends Controller
             }
 
             // Mettre à jour l'image
-            $product->image_main = $imagePath;
+            $product->image_main = $imageUrl;
 
             // Sauvegarder les modifications
             $product->save();
@@ -793,15 +799,17 @@ class ProductController extends Controller
                 ], 422);
             }
 
-            // Supprimer l'image principale si elle existe
-            if ($product->image_main && Storage::disk('public')->exists($product->image_main)) {
-                Storage::disk('public')->delete($product->image_main);
+            // Supprimer l'image principale de Cloudinary si elle existe
+            if ($product->image_main) {
+                $cloudinaryService = new CloudinaryService();
+                $cloudinaryService->deleteImage($product->image_main);
             }
 
-            // Supprimer toutes les images associées
+            // Supprimer toutes les images associées de Cloudinary
+            $cloudinaryService = new CloudinaryService();
             foreach ($product->images as $image) {
-                if (Storage::disk('public')->exists($image->media_path)) {
-                    Storage::disk('public')->delete($image->media_path);
+                if ($image->media_path) {
+                    $cloudinaryService->deleteImage($image->media_path);
                 }
             }
 
@@ -927,7 +935,15 @@ class ProductController extends Controller
                 'products.*.image_main' => 'required|string', // Image base64 obligatoire
                 'products.*.is_active' => 'nullable|boolean',
                 'products.*.sort_order' => 'nullable|integer|min:0',
-                // Validation des variantes (optionnelles)
+                // Validation des variantes communes (optionnelles)
+                'common_variants' => 'nullable|array|max:10', // Maximum 10 variantes communes
+                'common_variants.*.name' => 'required_with:common_variants|string|max:255',
+                'common_variants.*.price' => 'required_with:common_variants|numeric|min:0',
+                'common_variants.*.sku' => 'nullable|string|max:100',
+                'common_variants.*.stock_quantity' => 'nullable|integer|min:0',
+                'common_variants.*.is_active' => 'nullable|boolean',
+                'common_variants.*.sort_order' => 'nullable|integer|min:0',
+                // Validation des variantes individuelles (optionnelles - pour compatibilité)
                 'products.*.variants' => 'nullable|array',
                 'products.*.variants.*.name' => 'required_with:products.*.variants|string|max:255',
                 'products.*.variants.*.price' => 'required_with:products.*.variants|numeric|min:0',
@@ -954,6 +970,18 @@ class ProductController extends Controller
                 'products.*.is_active.boolean' => 'Le statut actif doit être vrai ou faux',
                 'products.*.sort_order.integer' => 'L\'ordre doit être un nombre entier',
                 'products.*.sort_order.min' => 'L\'ordre ne peut pas être négatif',
+                'common_variants.max' => 'Maximum 10 variantes communes',
+                'common_variants.*.name.required_with' => 'Le nom de la variante commune est obligatoire',
+                'common_variants.*.name.max' => 'Le nom de la variante commune ne peut pas dépasser 255 caractères',
+                'common_variants.*.price.required_with' => 'Le prix de la variante commune est obligatoire',
+                'common_variants.*.price.numeric' => 'Le prix de la variante commune doit être un nombre',
+                'common_variants.*.price.min' => 'Le prix de la variante commune ne peut pas être négatif',
+                'common_variants.*.sku.max' => 'Le SKU de la variante commune ne peut pas dépasser 100 caractères',
+                'common_variants.*.stock_quantity.integer' => 'La quantité en stock doit être un nombre entier',
+                'common_variants.*.stock_quantity.min' => 'La quantité en stock ne peut pas être négative',
+                'common_variants.*.is_active.boolean' => 'Le statut actif de la variante commune doit être vrai ou faux',
+                'common_variants.*.sort_order.integer' => 'L\'ordre de la variante commune doit être un nombre entier',
+                'common_variants.*.sort_order.min' => 'L\'ordre de la variante commune ne peut pas être négatif',
                 'products.*.variants.max' => 'Maximum 5 variantes par produit'
             ]);
 
@@ -982,6 +1010,16 @@ class ProductController extends Controller
                 $createdProducts = [];
                 $cloudinaryService = new CloudinaryService();
                 $sortOrder = 0;
+                
+                // Déterminer les variantes à utiliser (communes ou individuelles)
+                $commonVariants = $request->has('common_variants') && is_array($request->common_variants) ? $request->common_variants : null;
+                $useCommonVariants = !empty($commonVariants);
+                
+                \Log::info('Mode de création:', [
+                    'use_common_variants' => $useCommonVariants,
+                    'common_variants_count' => $useCommonVariants ? count($commonVariants) : 0,
+                    'products_count' => count($request->products)
+                ]);
                 
                 // Optimisation pour gros volumes : traiter par petits lots
                 $batchSize = 3; // Réduit à 3 pour éviter la surcharge avec variantes
@@ -1034,15 +1072,19 @@ class ProductController extends Controller
                         'is_active' => $productData['is_active'] ?? true
                     ]);
 
-                    // Créer les variantes si elles existent - Optimisé pour gros volumes
+                    // Créer les variantes selon le mode choisi
                     $createdVariants = [];
-                    \Log::info('Données du produit reçues:', ['product' => $productData]);
-                    if (isset($productData['variants']) && is_array($productData['variants']) && count($productData['variants']) > 0) {
-                        \Log::info('Variantes trouvées pour le produit:', ['variants' => $productData['variants']]);
+                    
+                    if ($useCommonVariants) {
+                        // Mode variantes communes : appliquer les variantes communes à tous les produits
+                        \Log::info('Application des variantes communes au produit:', [
+                            'product_name' => $product->name,
+                            'variants_count' => count($commonVariants)
+                        ]);
                         
-                        // Préparer les données des variantes pour insertion en masse
+                        // Préparer les données des variantes communes pour insertion en masse
                         $variantsToInsert = [];
-                        foreach ($productData['variants'] as $index => $variantData) {
+                        foreach ($commonVariants as $index => $variantData) {
                             $variantsToInsert[] = [
                                 'product_id' => $product->id,
                                 'name' => $variantData['name'],
@@ -1056,7 +1098,7 @@ class ProductController extends Controller
                             ];
                         }
                         
-                        // Insertion en masse des variantes
+                        // Insertion en masse des variantes communes
                         \DB::table('product_variants')->insert($variantsToInsert);
                         
                         // Récupérer les variantes créées pour la réponse
@@ -1068,6 +1110,42 @@ class ProductController extends Controller
                             
                         // Libérer la mémoire des données de variantes
                         unset($variantsToInsert);
+                        
+                    } else {
+                        // Mode variantes individuelles : utiliser les variantes spécifiques à chaque produit (compatibilité)
+                        \Log::info('Données du produit reçues:', ['product' => $productData]);
+                        if (isset($productData['variants']) && is_array($productData['variants']) && count($productData['variants']) > 0) {
+                            \Log::info('Variantes individuelles trouvées pour le produit:', ['variants' => $productData['variants']]);
+                            
+                            // Préparer les données des variantes pour insertion en masse
+                            $variantsToInsert = [];
+                            foreach ($productData['variants'] as $index => $variantData) {
+                                $variantsToInsert[] = [
+                                    'product_id' => $product->id,
+                                    'name' => $variantData['name'],
+                                    'price' => $variantData['price'],
+                                    'sku' => $variantData['sku'] ?? null,
+                                    'stock_quantity' => $variantData['stock_quantity'] ?? 0,
+                                    'is_active' => $variantData['is_active'] ?? true,
+                                    'sort_order' => $variantData['sort_order'] ?? $index,
+                                    'created_at' => now(),
+                                    'updated_at' => now()
+                                ];
+                            }
+                            
+                            // Insertion en masse des variantes individuelles
+                            \DB::table('product_variants')->insert($variantsToInsert);
+                            
+                            // Récupérer les variantes créées pour la réponse
+                            $createdVariants = \DB::table('product_variants')
+                                ->where('product_id', $product->id)
+                                ->select('id', 'name', 'price', 'sku', 'stock_quantity', 'is_active', 'sort_order')
+                                ->get()
+                                ->toArray();
+                                
+                            // Libérer la mémoire des données de variantes
+                            unset($variantsToInsert);
+                        }
                     }
 
                     $productResponse = [
@@ -1121,6 +1199,11 @@ class ProductController extends Controller
                             'id' => $category->id,
                             'name' => $category->name,
                             'slug' => $category->slug
+                        ],
+                        'variants_info' => [
+                            'mode' => $useCommonVariants ? 'common_variants' : 'individual_variants',
+                            'common_variants_count' => $useCommonVariants ? count($commonVariants) : 0,
+                            'total_variants_created' => $useCommonVariants ? count($commonVariants) * count($createdProducts) : array_sum(array_map(function($p) { return count($p['variants']); }, $createdProducts))
                         ]
                     ]
                 ], 201);

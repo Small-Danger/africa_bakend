@@ -495,35 +495,26 @@ class CategoryController extends Controller
                 ], 422);
             }
 
-            // Traitement de la nouvelle image si fournie (base64)
-            $oldImagePath = $category->image_main;
-            $imagePath = $oldImagePath;
+            // Traitement de la nouvelle image avec Cloudinary
+            $oldImageUrl = $category->image_main;
+            $imageUrl = $oldImageUrl;
+            $cloudinaryService = new CloudinaryService();
 
             if ($request->filled('image_main') && is_string($request->image_main)) {
                 try {
                     // Vérifier que c'est bien une image base64
                     if (strpos($request->image_main, 'data:image/') === 0) {
-                        // Extraire les données base64
-                        $base64Data = $request->image_main;
-                        $imageData = base64_decode(explode(',', $base64Data)[1]);
-                        
-                        // Déterminer l'extension à partir du type MIME
-                        $mimeType = explode(';', explode(',', $base64Data)[0])[0];
-                        $extension = str_replace('data:image/', '', $mimeType);
-                        
-                        // Générer un nom de fichier unique
-                        $fileName = 'category_' . time() . '_' . Str::random(10) . '.' . $extension;
-                        
-                        // Stocker la nouvelle image
-                        $imagePath = 'categories/' . $fileName;
-                        Storage::disk('public')->put($imagePath, $imageData);
-                        
-                        // Supprimer l'ancienne image si elle existe
-                        if ($oldImagePath && Storage::disk('public')->exists($oldImagePath)) {
-                            Storage::disk('public')->delete($oldImagePath);
+                        $uploadResult = $cloudinaryService->uploadBase64Image($request->image_main, 'bs_shop/categories');
+                        if ($uploadResult['success']) {
+                            $imageUrl = $uploadResult['secure_url'];
+                            
+                            // Supprimer l'ancienne image de Cloudinary si elle existe
+                            if ($oldImageUrl) {
+                                $cloudinaryService->deleteImage($oldImageUrl);
+                            }
+                            
+                            \Log::info('Image base64 mise à jour vers Cloudinary:', ['url' => $imageUrl]);
                         }
-                        
-                        \Log::info('Image base64 mise à jour:', ['path' => $imagePath, 'size' => strlen($imageData)]);
                     }
                 } catch (\Exception $e) {
                     \Log::error('Erreur lors de la mise à jour de l\'image base64:', ['error' => $e->getMessage()]);
@@ -563,7 +554,7 @@ class CategoryController extends Controller
             }
 
             // Mettre à jour l'image
-            $category->image_main = $imagePath;
+            $category->image_main = $imageUrl;
 
             // Sauvegarder les modifications
             $category->save();
@@ -642,9 +633,10 @@ class CategoryController extends Controller
                 ], 422);
             }
 
-            // Supprimer l'image associée si elle existe
-            if ($category->image_main && Storage::disk('public')->exists($category->image_main)) {
-                Storage::disk('public')->delete($category->image_main);
+            // Supprimer l'image de Cloudinary si elle existe
+            if ($category->image_main) {
+                $cloudinaryService = new CloudinaryService();
+                $cloudinaryService->deleteImage($category->image_main);
             }
 
             // Supprimer la catégorie

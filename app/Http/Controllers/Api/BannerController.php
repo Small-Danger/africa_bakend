@@ -295,28 +295,34 @@ class BannerController extends Controller
                 ], 422);
             }
 
-            // Traitement de la nouvelle image
-            $oldImagePath = $banner->image;
-            $imagePath = $oldImagePath;
-
+            // Traitement de la nouvelle image avec Cloudinary
+            $oldImageUrl = $banner->image;
+            $imageUrl = $oldImageUrl;
+            $cloudinaryService = new CloudinaryService();
+            
             // Vérifier si c'est une image base64
             if ($request->has('image') && $request->image && is_string($request->image)) {
-                $imagePath = $this->saveBase64Image($request->image, 'banners');
-                
-                // Supprimer l'ancienne image si elle existe
-                if ($oldImagePath && Storage::disk('public')->exists($oldImagePath)) {
-                    Storage::disk('public')->delete($oldImagePath);
+                $uploadResult = $cloudinaryService->uploadBase64Image($request->image, 'bs_shop/banners');
+                if ($uploadResult['success']) {
+                    $imageUrl = $uploadResult['secure_url'];
+                    
+                    // Supprimer l'ancienne image de Cloudinary si elle existe
+                    if ($oldImageUrl) {
+                        $cloudinaryService->deleteImage($oldImageUrl);
+                    }
                 }
             }
             // Vérifier si c'est un fichier uploadé (compatibilité FormData)
             elseif ($request->hasFile('image_file')) {
                 $image = $request->file('image_file');
-                $fileName = 'banner_' . time() . '_' . Str::random(10) . '.' . $image->getClientOriginalExtension();
-                $imagePath = $image->storeAs('banners', $fileName, 'public');
-                
-                // Supprimer l'ancienne image si elle existe
-                if ($oldImagePath && Storage::disk('public')->exists($oldImagePath)) {
-                    Storage::disk('public')->delete($oldImagePath);
+                $uploadResult = $cloudinaryService->uploadImage($image, 'bs_shop/banners');
+                if ($uploadResult['success']) {
+                    $imageUrl = $uploadResult['secure_url'];
+                    
+                    // Supprimer l'ancienne image de Cloudinary si elle existe
+                    if ($oldImageUrl) {
+                        $cloudinaryService->deleteImage($oldImageUrl);
+                    }
                 }
             }
 
@@ -338,7 +344,7 @@ class BannerController extends Controller
             }
 
             // Mettre à jour l'image
-            $banner->image = $imagePath;
+            $banner->image = $imageUrl;
 
             // Sauvegarder les modifications
             $banner->save();
@@ -388,9 +394,10 @@ class BannerController extends Controller
                 ], 404);
             }
 
-            // Supprimer l'image si elle existe
-            if ($banner->image && Storage::disk('public')->exists($banner->image)) {
-                Storage::disk('public')->delete($banner->image);
+            // Supprimer l'image de Cloudinary si elle existe
+            if ($banner->image) {
+                $cloudinaryService = new CloudinaryService();
+                $cloudinaryService->deleteImage($banner->image);
             }
 
             // Supprimer la bannière
@@ -450,46 +457,4 @@ class BannerController extends Controller
         }
     }
 
-    /**
-     * Sauvegarder une image base64 sur le disque
-     * 
-     * @param string $base64Data - Données base64 de l'image
-     * @param string $folder - Dossier de destination
-     * @return string|null - Chemin de l'image sauvegardée ou null si erreur
-     */
-    private function saveBase64Image(string $base64Data, string $folder): ?string
-    {
-        try {
-            // Vérifier le format base64
-            if (!preg_match('/^data:image\/(\w+);base64,/', $base64Data, $matches)) {
-                return null;
-            }
-
-            $imageType = $matches[1];
-            $base64String = substr($base64Data, strpos($base64Data, ',') + 1);
-            $imageData = base64_decode($base64String);
-
-            if ($imageData === false) {
-                return null;
-            }
-
-            // Vérifier que c'est bien une image
-            if (!getimagesizefromstring($imageData)) {
-                return null;
-            }
-
-            // Générer un nom de fichier unique
-            $fileName = 'banner_' . time() . '_' . Str::random(10) . '.' . $imageType;
-            $filePath = $folder . '/' . $fileName;
-
-            // Sauvegarder sur le disque
-            if (Storage::disk('public')->put($filePath, $imageData)) {
-                return $filePath;
-            }
-
-            return null;
-        } catch (\Exception $e) {
-            return null;
-        }
-    }
 }

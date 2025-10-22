@@ -306,9 +306,10 @@ class ImageController extends Controller
                 ], 404);
             }
 
-            // Supprimer le fichier physique
-            if (Storage::disk('public')->exists($media->media_path)) {
-                Storage::disk('public')->delete($media->media_path);
+            // Supprimer le média de Cloudinary si il existe
+            if ($media->media_path) {
+                $cloudinaryService = new CloudinaryService();
+                $cloudinaryService->deleteImage($media->media_path);
             }
 
             // Supprimer l'enregistrement en base de données

@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\ProductImage;
+use App\Services\CloudinaryService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
@@ -25,10 +26,18 @@ class ProductImageController extends Controller
         ]);
 
         try {
-            // Upload du fichier
+            // Upload du fichier vers Cloudinary
             $imageFile = $request->file('image');
-            $imageName = time() . '_' . $imageFile->getClientOriginalName();
-            $imagePath = $imageFile->storeAs('products', $imageName, 'public');
+            $cloudinaryService = new CloudinaryService();
+            $uploadResult = $cloudinaryService->uploadImage($imageFile, 'bs_shop/products/images');
+
+            if (!$uploadResult['success']) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Erreur lors de l\'upload de l\'image',
+                    'error' => $uploadResult['error']
+                ], 500);
+            }
 
             // Si c'est l'image principale, désactiver les autres
             if ($request->is_main) {
@@ -36,7 +45,8 @@ class ProductImageController extends Controller
             }
 
             $image = $product->images()->create([
-                'image_path' => $imagePath,
+                'media_path' => $uploadResult['secure_url'],
+                'media_type' => 'image',
                 'is_main' => $request->is_main ?? false,
                 'sort_order' => $request->sort_order ?? 0
             ]);
@@ -64,9 +74,10 @@ class ProductImageController extends Controller
         $image = $product->images()->findOrFail($imageId);
 
         try {
-            // Supprimer le fichier physique
-            if (Storage::disk('public')->exists($image->image_path)) {
-                Storage::disk('public')->delete($image->image_path);
+            // Supprimer l'image de Cloudinary si elle existe
+            if ($image->media_path) {
+                $cloudinaryService = new CloudinaryService();
+                $cloudinaryService->deleteImage($image->media_path);
             }
 
             // Supprimer l'enregistrement de la base de données
