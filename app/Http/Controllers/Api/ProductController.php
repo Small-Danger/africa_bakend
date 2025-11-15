@@ -1203,7 +1203,11 @@ class ProductController extends Controller
                         'variants_info' => [
                             'mode' => $useCommonVariants ? 'common_variants' : 'individual_variants',
                             'common_variants_count' => $useCommonVariants ? count($commonVariants) : 0,
-                            'total_variants_created' => $useCommonVariants ? count($commonVariants) * count($createdProducts) : array_sum(array_map(function($p) { return count($p['variants']); }, $createdProducts))
+                            'total_variants_created' => $useCommonVariants 
+                                ? count($commonVariants) * count($createdProducts) 
+                                : array_sum(array_map(function($p) { 
+                                    return count($p['variants'] ?? []); 
+                                }, $createdProducts))
                         ]
                     ]
                 ], 201);
