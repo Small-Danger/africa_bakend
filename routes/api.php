@@ -200,6 +200,19 @@ Route::middleware(['auth:sanctum', 'pos'])->prefix('pos')->group(function () {
 });
 
 // ========================================
+// SANTÉ API (monitoring / Railway healthcheck)
+// ========================================
+
+Route::get('/health', function () {
+    return response()->json([
+        'status' => 'ok',
+        'service' => 'afrikraga-api',
+        'version' => '1.1.0-pos',
+        'timestamp' => now()->toIso8601String(),
+    ]);
+});
+
+// ========================================
 // ROUTES DE TEST (à supprimer en production)
 // ========================================
 
