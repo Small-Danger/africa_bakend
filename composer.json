@@ -75,9 +75,7 @@
         "allow-plugins": {
             "pestphp/pest-plugin": true,
             "php-http/discovery": true
-        },
-        "secure-http": false,
-        "cafile": "C:/Users/USER/OneDrive/Bureau/AFRIKRAGA/Africkraga/bs_shop_backend/cacert.pem"
+        }
     },
     "minimum-stability": "stable",
     "prefer-stable": true
