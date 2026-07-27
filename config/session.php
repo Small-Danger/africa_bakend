@@ -18,7 +18,8 @@ return [
     |
     */
 
-    'driver' => env('SESSION_DRIVER', 'redis'),
+    // cookie : pas de requête SQL par requête API (évite l'échec si Postgres est lent/injoignable pour la table sessions)
+    'driver' => env('SESSION_DRIVER', 'cookie'),
 
     /*
     |--------------------------------------------------------------------------

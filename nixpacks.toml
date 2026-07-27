@@ -1,12 +1,13 @@
-# API Laravel — pas de build Vite (frontend séparé sur africa_frontend)
-[variables]
-NIXPACKS_PHP_ROOT_DIR = "/app/public"
+# API Laravel pure — pas de build Node (frontend = repo africa_frontend séparé)
 
 [phases.install]
-cmds = ["composer install --no-dev --optimize-autoloader --no-interaction"]
+cmds = ["composer install --no-dev --optimize-autoloader --no-interaction --ignore-platform-reqs"]
 
 [phases.build]
-cmds = ["php artisan config:cache || true", "php artisan route:cache || true"]
+cmds = [
+  "mkdir -p storage/framework/cache storage/framework/sessions storage/framework/views storage/logs bootstrap/cache",
+  "chmod -R 775 storage bootstrap/cache || true"
+]
 
 [start]
 cmd = "php artisan serve --host=0.0.0.0 --port=$PORT"
