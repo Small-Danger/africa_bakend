@@ -13,11 +13,24 @@ class Order extends Model
         'total_amount',
         'status',
         'whatsapp_message_id',
-        'notes'
+        'notes',
+        'channel',
+        'cashier_id',
+        'cash_session_id',
+        'amount_received',
+        'discount_amount',
+        'discount_reason',
+        'walk_in_name',
+        'cancelled_by',
+        'cancellation_reason',
+        'cancelled_at',
     ];
 
     protected $casts = [
-        'total_amount' => 'decimal:2'
+        'total_amount' => 'decimal:2',
+        'amount_received' => 'decimal:2',
+        'discount_amount' => 'decimal:2',
+        'cancelled_at' => 'datetime',
     ];
 
     // Relation avec le client
@@ -30,6 +43,26 @@ class Order extends Model
     public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class);
+    }
+
+    public function cashier(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cashier_id');
+    }
+
+    public function cashSession(): BelongsTo
+    {
+        return $this->belongsTo(CashSession::class);
+    }
+
+    public function payments(): HasMany
+    {
+        return $this->hasMany(OrderPayment::class);
+    }
+
+    public function cancelledByUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'cancelled_by');
     }
 
     // Scope pour les commandes en attente

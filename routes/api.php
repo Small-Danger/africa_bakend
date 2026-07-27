@@ -13,6 +13,12 @@ use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\SuggestionController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\BannerController;
+use App\Http\Controllers\Api\Pos\PosCashMovementController;
+use App\Http\Controllers\Api\Pos\PosCashSessionController;
+use App\Http\Controllers\Api\Pos\PosClientController;
+use App\Http\Controllers\Api\Pos\PosOrderController;
+use App\Http\Controllers\Api\Pos\PosPinController;
+use App\Http\Controllers\Api\Pos\PosProductController;
 
 /*
 |--------------------------------------------------------------------------
@@ -164,6 +170,33 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
                 Route::delete('/{id}', [BannerController::class, 'destroy']);
                 Route::post('/{id}/toggle-status', [BannerController::class, 'toggleStatus']);
             });
+});
+
+// ========================================
+// ROUTES CAISSE (POS) — admin & caissière
+// ========================================
+
+Route::middleware(['auth:sanctum', 'pos'])->prefix('pos')->group(function () {
+    Route::prefix('cash-session')->group(function () {
+        Route::get('/current', [PosCashSessionController::class, 'current']);
+        Route::post('/open', [PosCashSessionController::class, 'open']);
+        Route::post('/close', [PosCashSessionController::class, 'close']);
+    });
+
+    Route::get('/products/search', [PosProductController::class, 'search']);
+    Route::get('/clients/search', [PosClientController::class, 'search']);
+    Route::post('/clients/quick-create', [PosClientController::class, 'quickCreate']);
+
+    Route::post('/orders', [PosOrderController::class, 'store']);
+    Route::get('/orders/today', [PosOrderController::class, 'today']);
+    Route::post('/orders/{id}/cancel', [PosOrderController::class, 'cancel']);
+
+    Route::get('/cash-movements/current-session', [PosCashMovementController::class, 'currentSession']);
+    Route::post('/cash-movements', [PosCashMovementController::class, 'store']);
+
+    Route::get('/pin/status', [PosPinController::class, 'hasPin']);
+    Route::post('/set-pin', [PosPinController::class, 'setPin']);
+    Route::post('/unlock', [PosPinController::class, 'unlock']);
 });
 
 // ========================================

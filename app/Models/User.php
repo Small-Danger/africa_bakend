@@ -24,6 +24,7 @@ class User extends Authenticatable
         'email',
         'password',
         'whatsapp_phone',
+        'phone',
         'role',
         'is_active'
     ];
@@ -36,6 +37,7 @@ class User extends Authenticatable
     protected $hidden = [
         'password',
         'remember_token',
+        'pos_pin',
     ];
 
     /**
@@ -60,6 +62,11 @@ class User extends Authenticatable
     public function cartSessions()
     {
         return $this->hasMany(CartSession::class);
+    }
+
+    public function cashSessions()
+    {
+        return $this->hasMany(CashSession::class, 'cashier_id');
     }
 
     // Scopes
@@ -92,6 +99,16 @@ class User extends Authenticatable
     public function isClient(): bool
     {
         return $this->role === 'client';
+    }
+
+    public function isCashier(): bool
+    {
+        return $this->role === 'caissiere';
+    }
+
+    public function canAccessPos(): bool
+    {
+        return $this->isAdmin() || $this->isCashier();
     }
 
     public function isActive(): bool

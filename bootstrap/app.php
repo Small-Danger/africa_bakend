@@ -16,6 +16,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'admin' => \App\Http\Middleware\AdminMiddleware::class,
             'large.upload' => \App\Http\Middleware\LargeFileUpload::class,
+            'pos' => \App\Http\Middleware\PosMiddleware::class,
         ]);
         
         // Désactiver CSRF pour toutes les routes API (solution simple)

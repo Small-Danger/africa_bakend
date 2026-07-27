@@ -11,7 +11,8 @@ class ProductVariant extends Model
     protected $fillable = [
         'product_id',
         'name',
-        'sku',               // Code SKU unique de la variante
+        'sku',
+        'barcode',
         'price',
         'stock_quantity',
         'is_active',
