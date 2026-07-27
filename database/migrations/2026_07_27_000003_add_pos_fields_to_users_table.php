@@ -16,11 +16,8 @@ return new class extends Migration
         if (DB::getDriverName() === 'pgsql') {
             DB::statement('ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check');
             DB::statement("ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (((role)::text = ANY ((ARRAY['admin'::character varying, 'client'::character varying, 'caissiere'::character varying])::text[])))");
+            DB::statement('ALTER TABLE users ALTER COLUMN password DROP NOT NULL');
         }
-
-        Schema::table('users', function (Blueprint $table) {
-            $table->string('password')->nullable()->change();
-        });
     }
 
     public function down(): void
@@ -33,10 +30,7 @@ return new class extends Migration
         if (DB::getDriverName() === 'pgsql') {
             DB::statement('ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check');
             DB::statement("ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (((role)::text = ANY ((ARRAY['admin'::character varying, 'client'::character varying])::text[])))");
+            DB::statement('ALTER TABLE users ALTER COLUMN password SET NOT NULL');
         }
-
-        Schema::table('users', function (Blueprint $table) {
-            $table->string('password')->nullable(false)->change();
-        });
     }
 };
