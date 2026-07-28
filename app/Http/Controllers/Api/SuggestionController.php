@@ -259,8 +259,11 @@ class SuggestionController extends Controller
     private function formatProducts($products): array
     {
         return $products->map(function ($product) {
-            $variant = $product->variants->where('is_active', true)->first();
-            $price = $variant ? $variant->price : ($product->base_price ?? 0);
+            $activeVariants = $product->variants->where('is_active', true);
+            $cheapest = $activeVariants->sortBy('price')->first()
+                ?? $product->variants->sortBy('price')->first();
+            $price = $cheapest ? $cheapest->price : ($product->base_price ?? 0);
+            $variantsCount = $product->variants->count();
 
             return [
                 'id' => $product->id,
@@ -270,6 +273,10 @@ class SuggestionController extends Controller
                 'image_main' => $product->image_main,
                 'price' => $price,
                 'base_price' => $product->base_price,
+                'min_price' => $variantsCount > 0 ? $product->variants->min('price') : $product->base_price,
+                'min_price_label' => $cheapest?->name,
+                'has_variants' => $variantsCount > 1,
+                'variants_count' => $variantsCount,
                 'category' => [
                     'id' => $product->category->id,
                     'name' => $product->category->name,

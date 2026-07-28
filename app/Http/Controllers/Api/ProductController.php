@@ -138,6 +138,7 @@ class ProductController extends Controller
                     'has_variants' => $product->hasVariants(),
                     'variants_count' => $product->variants->count(),
                     'min_price' => $product->variants->count() > 0 ? $product->variants->min('price') : $product->base_price,
+                    'min_price_label' => $product->variants->sortBy('price')->first()?->name,
                     'max_price' => $product->variants->count() > 0 ? $product->variants->max('price') : $product->base_price,
                     'sort_order' => $product->sort_order,
                     'created_at' => $product->created_at,
@@ -291,6 +292,7 @@ class ProductController extends Controller
                     'has_variants' => $product->hasVariants(),
                     'variants_count' => $product->variants->count(),
                     'min_price' => $product->variants->count() > 0 ? $product->variants->min('price') : $product->base_price,
+                    'min_price_label' => $product->variants->sortBy('price')->first()?->name,
                     'max_price' => $product->variants->count() > 0 ? $product->variants->max('price') : $product->base_price,
                     'sort_order' => $product->sort_order,
                     'created_at' => $product->created_at,
@@ -420,6 +422,7 @@ class ProductController extends Controller
                 'pricing' => [
                     'base_price' => $product->base_price,
                     'min_price' => $product->variants->count() > 0 ? $product->variants->min('price') : $product->base_price,
+                    'min_price_label' => $product->variants->sortBy('price')->first()?->name,
                     'max_price' => $product->variants->count() > 0 ? $product->variants->max('price') : $product->base_price,
                     'has_price_range' => $product->variants->count() > 0
                 ],
