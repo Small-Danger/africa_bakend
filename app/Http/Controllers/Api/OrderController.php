@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class OrderController extends Controller
@@ -670,28 +671,27 @@ class OrderController extends Controller
                 ], 403);
             }
 
+            $perPage = min(max((int) $request->input('per_page', 20), 1), 1000);
+
             // Récupérer toutes les commandes avec pagination
             $orders = Order::with(['client', 'items.product', 'items.variant'])
                 ->orderBy('created_at', 'desc')
-                ->paginate(20);
+                ->paginate($perPage);
 
             // Formater les commandes
             $formattedOrders = $orders->getCollection()->map(function ($order) {
                 return [
                     'id' => $order->id,
                     'order_number' => 'CMD-' . str_pad($order->id, 6, '0', STR_PAD_LEFT),
-                    'client' => [
-                        'id' => $order->client->id,
-                        'name' => $order->client->name,
-                        'whatsapp_phone' => $order->client->whatsapp_phone
-                    ],
+                    'client' => $this->formatOrderClient($order),
                     'status' => $order->status,
                     'total_amount' => $order->total_amount,
+                    'channel' => $order->channel ?? 'en_ligne',
                     'items' => $order->items->map(function ($item) {
                         return [
                             'id' => $item->id,
-                            'product_name' => $item->product->name,
-                            'variant_name' => $item->variant ? $item->variant->name : null,
+                            'product_name' => $item->product?->name ?? 'Produit indisponible',
+                            'variant_name' => $item->variant?->name,
                             'quantity' => $item->quantity,
                             'price' => $item->unit_price,
                             'total_price' => $item->total_price
@@ -733,6 +733,11 @@ class OrderController extends Controller
             ], 200);
 
         } catch (\Exception $e) {
+            \Log::error('Erreur adminIndex commandes', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Erreur lors de la récupération des commandes',
@@ -777,28 +782,33 @@ class OrderController extends Controller
             $formattedOrder = [
                 'id' => $order->id,
                 'order_number' => 'CMD-' . str_pad($order->id, 6, '0', STR_PAD_LEFT),
-                'client' => [
-                    'id' => $order->client->id,
-                    'name' => $order->client->name,
-                    'email' => $order->client->email,
-                    'whatsapp_phone' => $order->client->whatsapp_phone
-                ],
+                'client' => $this->formatOrderClient($order, true),
                 'status' => $order->status,
                 'total_amount' => $order->total_amount,
                 'notes' => $order->notes,
                 'whatsapp_message_id' => $order->whatsapp_message_id,
+                'channel' => $order->channel ?? 'en_ligne',
                 'items' => $order->items->map(function ($item) {
+                    $product = $item->product;
+                    $category = $product?->category;
+
                     return [
                         'id' => $item->id,
-                        'product' => [
-                            'id' => $item->product->id,
-                            'name' => $item->product->name,
-                            'slug' => $item->product->slug,
-                            'image_main' => $item->product->image_main,
-                            'category' => [
-                                'id' => $item->product->category->id,
-                                'name' => $item->product->category->name
-                            ]
+                        'product' => $product ? [
+                            'id' => $product->id,
+                            'name' => $product->name,
+                            'slug' => $product->slug,
+                            'image_main' => $product->image_main,
+                            'category' => $category ? [
+                                'id' => $category->id,
+                                'name' => $category->name
+                            ] : null
+                        ] : [
+                            'id' => $item->product_id,
+                            'name' => 'Produit indisponible',
+                            'slug' => null,
+                            'image_main' => null,
+                            'category' => null
                         ],
                         'variant' => $item->variant ? [
                             'id' => $item->variant->id,
@@ -901,11 +911,7 @@ class OrderController extends Controller
                 'status' => $order->status,
                 'status_changed' => $oldStatus !== $order->status,
                 'old_status' => $oldStatus,
-                'client' => [
-                    'id' => $order->client->id,
-                    'name' => $order->client->name,
-                    'whatsapp_phone' => $order->client->whatsapp_phone
-                ],
+                'client' => $this->formatOrderClient($order),
                 'total_amount' => $order->total_amount,
                 'notes' => $order->notes,
                 'updated_at' => $order->updated_at
@@ -927,6 +933,38 @@ class OrderController extends Controller
     }
 
     /**
+     * Formater les informations client d'une commande (client en ligne, invité ou caisse).
+     */
+    private function formatOrderClient(Order $order, bool $includeEmail = false): array
+    {
+        if ($order->client) {
+            $client = [
+                'id' => $order->client->id,
+                'name' => $order->client->name,
+                'whatsapp_phone' => $order->client->whatsapp_phone,
+            ];
+
+            if ($includeEmail) {
+                $client['email'] = $order->client->email;
+            }
+
+            return $client;
+        }
+
+        $client = [
+            'id' => null,
+            'name' => $order->walk_in_name ?? 'Client invité',
+            'whatsapp_phone' => null,
+        ];
+
+        if ($includeEmail) {
+            $client['email'] = null;
+        }
+
+        return $client;
+    }
+
+    /**
      * Générer le message WhatsApp pour la commande
      * 
      * @param Order $order - La commande
@@ -940,7 +978,7 @@ class OrderController extends Controller
         
         $message .= "📦 *PRODUITS COMMANDÉS:*\n";
         foreach ($order->items as $item) {
-            $productName = $item->product->name;
+            $productName = $item->product?->name ?? 'Produit indisponible';
             $variantName = $item->variant ? " - " . $item->variant->name : "";
             $quantity = $item->quantity;
             $price = number_format($item->total_price, 2);
