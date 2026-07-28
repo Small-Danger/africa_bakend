@@ -9,6 +9,7 @@ use App\Models\OrderItem;
 use App\Models\OrderPayment;
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Services\PosClientResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -40,6 +41,8 @@ class PosOrderController extends Controller
             'discount_amount' => 'nullable|numeric|min:0',
             'discount_reason' => 'nullable|string|max:255',
             'client_id' => 'nullable|exists:users,id',
+            'client_phone' => 'nullable|string|max:30',
+            'client_name' => 'nullable|string|max:255',
             'walk_in_name' => 'nullable|string|max:255',
             'payments' => 'required|array|min:1',
             'payments.*.method' => 'required|in:especes,carte,orange_money,wave',
@@ -84,11 +87,30 @@ class PosOrderController extends Controller
             ], 422);
         }
 
+        $clientName = $request->client_name ?: $request->walk_in_name;
+        $clientPhone = $request->client_phone ? trim($request->client_phone) : null;
+
+        if ($clientPhone && !$request->client_id && !trim((string) $clientName)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Nom requis pour enregistrer un nouveau client',
+                'errors' => [
+                    'client_name' => ['Saisissez le nom du client pour ce numéro inconnu'],
+                ],
+            ], 422);
+        }
+
         try {
             DB::beginTransaction();
 
+            $clientId = PosClientResolver::resolveForSale(
+                $request->client_id,
+                $clientPhone,
+                $clientName
+            );
+
             $order = Order::create([
-                'client_id' => $request->client_id,
+                'client_id' => $clientId,
                 'total_amount' => $totalAmount,
                 'status' => 'disponible',
                 'channel' => 'boutique',
@@ -97,7 +119,7 @@ class PosOrderController extends Controller
                 'amount_received' => $paymentsSum,
                 'discount_amount' => $discountAmount,
                 'discount_reason' => $request->discount_reason,
-                'walk_in_name' => $request->walk_in_name,
+                'walk_in_name' => $clientId ? null : ($clientName ?: null),
             ]);
 
             foreach ($items as $item) {

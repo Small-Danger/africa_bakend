@@ -3,11 +3,10 @@
 namespace App\Http\Controllers\Api\Pos;
 
 use App\Http\Controllers\Controller;
-use App\Models\User;
+use App\Services\PosClientResolver;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Str;
 
 class PosClientController extends Controller
 {
@@ -19,21 +18,50 @@ class PosClientController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => [],
+                'meta' => [
+                    'status' => 'idle',
+                    'count' => 0,
+                ],
             ]);
         }
 
-        $clients = User::query()
-            ->where('role', 'client')
-            ->where(function ($q) use ($phone) {
-                $q->where('phone', 'ilike', "%{$phone}%")
-                    ->orWhere('whatsapp_phone', 'ilike', "%{$phone}%");
-            })
-            ->limit(10)
-            ->get(['id', 'name', 'phone', 'whatsapp_phone', 'email']);
+        if (strlen(PosClientResolver::normalizePhone($phone)) < 4) {
+            return response()->json([
+                'success' => true,
+                'data' => [],
+                'meta' => [
+                    'status' => 'too_short',
+                    'count' => 0,
+                    'message' => 'Saisissez au moins 4 chiffres',
+                ],
+            ]);
+        }
+
+        $clients = PosClientResolver::searchByPhone($phone);
+        $exactMatch = PosClientResolver::findExactByPhone($phone);
+
+        $status = 'not_found';
+        if ($exactMatch) {
+            $status = 'exact';
+        } elseif ($clients->isNotEmpty()) {
+            $status = 'partial';
+        }
 
         return response()->json([
             'success' => true,
-            'data' => $clients,
+            'data' => $clients->values(),
+            'meta' => [
+                'status' => $status,
+                'count' => $clients->count(),
+                'exact_match' => $exactMatch
+                    ? PosClientResolver::formatClient($exactMatch)
+                    : null,
+                'message' => match ($status) {
+                    'exact' => 'Client existant trouvé',
+                    'partial' => 'Plusieurs clients correspondent — sélectionnez',
+                    default => 'Nouveau numéro — saisissez le nom pour l\'enregistrer',
+                },
+            ],
         ]);
     }
 
@@ -57,36 +85,25 @@ class PosClientController extends Controller
         $phone = $request->phone ? trim($request->phone) : null;
 
         if ($phone) {
-            $existing = User::query()
-                ->where('role', 'client')
-                ->where(function ($q) use ($phone) {
-                    $q->where('phone', $phone)->orWhere('whatsapp_phone', $phone);
-                })
-                ->first();
+            $existing = PosClientResolver::findExactByPhone($phone);
 
             if ($existing) {
                 return response()->json([
                     'success' => true,
                     'message' => 'Client existant trouvé',
-                    'data' => $existing->only(['id', 'name', 'phone', 'whatsapp_phone', 'email']),
+                    'data' => PosClientResolver::formatClient($existing),
+                    'meta' => ['created' => false],
                 ]);
             }
         }
 
-        $client = User::create([
-            'name' => $request->name,
-            'phone' => $phone,
-            'whatsapp_phone' => $phone,
-            'email' => 'pos_' . time() . '_' . Str::random(6) . '@afrikraga.local',
-            'password' => null,
-            'role' => 'client',
-            'is_active' => true,
-        ]);
+        $client = PosClientResolver::createClient($request->name, $phone);
 
         return response()->json([
             'success' => true,
-            'message' => 'Client créé',
-            'data' => $client->only(['id', 'name', 'phone', 'whatsapp_phone', 'email']),
+            'message' => 'Client enregistré',
+            'data' => PosClientResolver::formatClient($client),
+            'meta' => ['created' => true],
         ], 201);
     }
 }
