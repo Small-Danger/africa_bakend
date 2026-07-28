@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\SuggestionController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\BannerController;
+use App\Http\Controllers\Api\AdminCashierController;
 use App\Http\Controllers\Api\Pos\PosCashMovementController;
 use App\Http\Controllers\Api\Pos\PosCashSessionController;
 use App\Http\Controllers\Api\Pos\PosClientController;
@@ -159,6 +160,14 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
         Route::get('/{id}', [CustomerController::class, 'show']);
         Route::post('/toggle-status', [CustomerController::class, 'toggleStatus']);
         Route::post('/bulk-action', [CustomerController::class, 'bulkAction']);
+    });
+
+    // Personnel caisse (caissières)
+    Route::prefix('cashiers')->group(function () {
+        Route::get('/', [AdminCashierController::class, 'index']);
+        Route::post('/', [AdminCashierController::class, 'store']);
+        Route::put('/{id}', [AdminCashierController::class, 'update']);
+        Route::post('/{id}/toggle-status', [AdminCashierController::class, 'toggleStatus']);
     });
     
                 // Gestion des bannières

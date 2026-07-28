@@ -169,7 +169,11 @@ class AuthController extends Controller
             $user->tokens()->delete();
 
             // Créer le nouveau token Sanctum avec les bonnes permissions
-            $abilities = $user->isAdmin() ? ['admin'] : ['client'];
+            $abilities = match (true) {
+                $user->isAdmin() => ['admin'],
+                $user->isCashier() => ['caissiere'],
+                default => ['client'],
+            };
             $token = $user->createToken('auth-token', $abilities)->plainTextToken;
 
             // Retourner la réponse de succès

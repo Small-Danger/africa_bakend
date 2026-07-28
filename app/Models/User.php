@@ -80,6 +80,11 @@ class User extends Authenticatable
         return $query->where('role', 'admin');
     }
 
+    public function scopeCashiers($query)
+    {
+        return $query->where('role', 'caissiere');
+    }
+
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
