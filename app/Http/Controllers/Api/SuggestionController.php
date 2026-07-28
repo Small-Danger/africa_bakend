@@ -116,7 +116,7 @@ class SuggestionController extends Controller
         $categoryIds = array_unique(array_column($cartItems, 'category_id'));
         $cartProductIds = array_column($cartItems, 'id');
 
-        $products = Product::with(['category', 'variants'])
+        $products = Product::with(['category.parent', 'variants'])
             ->where('is_active', true)
             ->whereIn('category_id', $categoryIds)
             ->whereNotIn('id', $cartProductIds)
@@ -156,7 +156,7 @@ class SuggestionController extends Controller
             return $this->getSimilarProductsForCart($cartItems, 3);
         }
 
-        $products = Product::with(['category', 'variants'])
+        $products = Product::with(['category.parent', 'variants'])
             ->whereIn('id', $frequentlyBought)
             ->get();
 
@@ -168,7 +168,7 @@ class SuggestionController extends Controller
      */
     private function getSimilarProductsByCategory($product, int $limit = 6): array
     {
-        $products = Product::with(['category', 'variants'])
+        $products = Product::with(['category.parent', 'variants'])
             ->where('is_active', true)
             ->where('category_id', $product->category_id)
             ->where('id', '!=', $product->id)
@@ -184,7 +184,7 @@ class SuggestionController extends Controller
      */
     private function getPopularProductsInCategory(int $categoryId, int $limit = 4): array
     {
-        $products = Product::with(['category', 'variants'])
+        $products = Product::with(['category.parent', 'variants'])
             ->where('is_active', true)
             ->where('category_id', $categoryId)
             ->leftJoin('order_items', 'products.id', '=', 'order_items.product_id')
@@ -210,7 +210,7 @@ class SuggestionController extends Controller
         $cartProductIds = array_column($cartItems, 'id');
         $categoryIds = array_unique(array_column($cartItems, 'category_id'));
 
-        $products = Product::with(['category', 'variants'])
+        $products = Product::with(['category.parent', 'variants'])
             ->where('is_active', true)
             ->whereIn('category_id', $categoryIds)
             ->whereNotIn('id', $cartProductIds)
@@ -226,7 +226,7 @@ class SuggestionController extends Controller
      */
     private function getPopularProducts(int $limit = 4): array
     {
-        $products = Product::with(['category', 'variants'])
+        $products = Product::with(['category.parent', 'variants'])
             ->where('is_active', true)
             ->leftJoin('order_items', 'products.id', '=', 'order_items.product_id')
             ->select('products.*', DB::raw('COALESCE(SUM(order_items.quantity), 0) as total_sold'))
@@ -244,7 +244,7 @@ class SuggestionController extends Controller
      */
     private function getRecentProducts(int $limit = 4): array
     {
-        $products = Product::with(['category', 'variants'])
+        $products = Product::with(['category.parent', 'variants'])
             ->where('is_active', true)
             ->orderBy('created_at', 'desc')
             ->limit($limit)
@@ -273,7 +273,12 @@ class SuggestionController extends Controller
                 'category' => [
                     'id' => $product->category->id,
                     'name' => $product->category->name,
-                    'slug' => $product->category->slug
+                    'slug' => $product->category->slug,
+                    'parent' => $product->category->parent ? [
+                        'id' => $product->category->parent->id,
+                        'name' => $product->category->parent->name,
+                        'slug' => $product->category->parent->slug,
+                    ] : null,
                 ],
                 'variant' => $variant ? [
                     'id' => $variant->id,

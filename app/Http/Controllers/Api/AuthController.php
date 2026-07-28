@@ -4,15 +4,37 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Support\WhatsAppPhoneValidator;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    /**
+     * Format unique des données utilisateur renvoyées par l'API.
+     *
+     * @return array<string, mixed>
+     */
+    private function userPayload(User $user): array
+    {
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'whatsapp_phone' => $user->whatsapp_phone,
+            'role' => $user->role,
+            'is_admin' => $user->isAdmin(),
+            'created_at' => optional($user->created_at)->toIso8601String(),
+            'updated_at' => optional($user->updated_at)->toIso8601String(),
+        ];
+    }
+
     /**
      * Inscription d'un nouveau client
      * 
@@ -21,27 +43,45 @@ class AuthController extends Controller
      */
     public function register(Request $request): JsonResponse
     {
+        $normalizedPhone = WhatsAppPhoneValidator::normalize($request->whatsapp_phone);
+        $request->merge([
+            'whatsapp_phone' => $normalizedPhone,
+            'email' => $request->filled('email') ? trim($request->email) : null,
+        ]);
+
         // Validation des données d'inscription
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
-            'email' => 'nullable|email|unique:users,email', // Email optionnel mais unique si fourni
-            'whatsapp_phone' => 'required|string|unique:users,whatsapp_phone', // Téléphone WhatsApp obligatoire
-            'password' => 'required|string|min:8|confirmed', // Mot de passe avec confirmation
+            'email' => 'nullable|email|unique:users,email',
+            'whatsapp_phone' => [
+                'required',
+                'string',
+                'unique:users,whatsapp_phone',
+                function ($attribute, $value, $fail) {
+                    if (! WhatsAppPhoneValidator::isValid($value)) {
+                        $fail('Numéro WhatsApp invalide. Vérifiez l\'indicatif et le format mobile.');
+                    }
+                },
+            ],
+            'password' => 'required|string|min:8|confirmed',
         ], [
             'name.required' => 'Le nom est obligatoire',
             'whatsapp_phone.required' => 'Le numéro WhatsApp est obligatoire',
             'whatsapp_phone.unique' => 'Ce numéro WhatsApp est déjà utilisé',
+            'email.email' => 'Format d\'email invalide',
             'email.unique' => 'Cet email est déjà utilisé',
             'password.min' => 'Le mot de passe doit contenir au moins 8 caractères',
-            'password.confirmed' => 'La confirmation du mot de passe ne correspond pas'
+            'password.confirmed' => 'La confirmation du mot de passe ne correspond pas',
         ]);
 
         // Si validation échoue, retourner les erreurs
         if ($validator->fails()) {
+            $firstError = collect($validator->errors()->all())->first();
+
             return response()->json([
                 'success' => false,
-                'message' => 'Erreur de validation',
-                'errors' => $validator->errors()
+                'message' => $firstError ?: 'Corrigez les informations saisies',
+                'errors' => $validator->errors(),
             ], 422);
         }
 
@@ -50,7 +90,7 @@ class AuthController extends Controller
             $user = User::create([
                 'name' => $request->name,
                 'email' => $request->email,
-                'whatsapp_phone' => $request->whatsapp_phone,
+                'whatsapp_phone' => $normalizedPhone,
                 'password' => Hash::make($request->password),
                 'role' => 'client' // Par défaut, tous les nouveaux utilisateurs sont des clients
             ]);
@@ -63,24 +103,18 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Inscription réussie ! Bienvenue ' . $user->name,
                 'data' => [
-                    'user' => [
-                        'id' => $user->id,
-                        'name' => $user->name,
-                        'email' => $user->email,
-                        'whatsapp_phone' => $user->whatsapp_phone,
-                        'role' => $user->role
-                    ],
+                    'user' => $this->userPayload($user),
                     'token' => $token,
                     'token_type' => 'Bearer'
                 ]
             ], 201);
 
         } catch (\Exception $e) {
-            // En cas d'erreur, retourner un message d'erreur
+            \Log::error('Register failed', ['error' => $e->getMessage()]);
+
             return response()->json([
                 'success' => false,
-                'message' => 'Erreur lors de l\'inscription',
-                'error' => 'Une erreur est survenue, veuillez réessayer'
+                'message' => 'Impossible de créer le compte pour le moment. Réessayez dans quelques instants.',
             ], 500);
         }
     }
@@ -93,6 +127,11 @@ class AuthController extends Controller
      */
     public function login(Request $request): JsonResponse
     {
+        $normalizedPhone = WhatsAppPhoneValidator::normalize($request->whatsapp_phone);
+        if ($normalizedPhone) {
+            $request->merge(['whatsapp_phone' => $normalizedPhone]);
+        }
+
         // Debug: Log des données reçues
         \Log::info('Login attempt', [
             'all_data' => $request->all(),
@@ -181,14 +220,7 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Connexion réussie ! Bonjour ' . $user->name,
                 'data' => [
-                    'user' => [
-                        'id' => $user->id,
-                        'name' => $user->name,
-                        'email' => $user->email,
-                        'whatsapp_phone' => $user->whatsapp_phone,
-                        'role' => $user->role,
-                        'is_admin' => $user->isAdmin()
-                    ],
+                    'user' => $this->userPayload($user),
                     'token' => $token,
                     'token_type' => 'Bearer',
                     'abilities' => $abilities
@@ -265,16 +297,7 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Profil récupéré avec succès',
                 'data' => [
-                    'user' => [
-                        'id' => $user->id,
-                        'name' => $user->name,
-                        'email' => $user->email,
-                        'whatsapp_phone' => $user->whatsapp_phone,
-                        'role' => $user->role,
-                        'is_admin' => $user->isAdmin(),
-                        'created_at' => $user->created_at,
-                        'updated_at' => $user->updated_at
-                    ]
+                    'user' => $this->userPayload($user)
                 ]
             ], 200);
 
@@ -306,36 +329,64 @@ class AuthController extends Controller
                 ], 401);
             }
 
+            // Normaliser le WhatsApp avant validation (mêmes règles qu'à l'inscription)
+            if ($request->has('whatsapp_phone')) {
+                $request->merge([
+                    'whatsapp_phone' => WhatsAppPhoneValidator::normalize($request->whatsapp_phone),
+                ]);
+            }
+
+            // L'email est optionnel : une chaîne vide signifie « retirer l'email »
+            if ($request->has('email') && trim((string) $request->email) === '') {
+                $request->merge(['email' => null]);
+            }
+
             // Validation des données de mise à jour
             $validator = Validator::make($request->all(), [
-                'name' => 'sometimes|string|max:255',
-                'email' => 'sometimes|email|unique:users,email,' . $user->id,
-                'whatsapp_phone' => 'sometimes|string|unique:users,whatsapp_phone,' . $user->id,
+                'name' => 'sometimes|string|min:2|max:255',
+                'email' => 'sometimes|nullable|email|unique:users,email,' . $user->id,
+                'whatsapp_phone' => [
+                    'sometimes',
+                    'required',
+                    'string',
+                    'unique:users,whatsapp_phone,' . $user->id,
+                    function ($attribute, $value, $fail) {
+                        if (! WhatsAppPhoneValidator::isValid($value)) {
+                            $fail('Numéro WhatsApp invalide. Vérifiez l\'indicatif et le format mobile.');
+                        }
+                    },
+                ],
                 'current_password' => 'required_with:new_password|string',
-                'new_password' => 'sometimes|string|min:8|confirmed'
+                'new_password' => 'sometimes|string|min:8|confirmed',
             ], [
-                'email.unique' => 'Cet email est déjà utilisé',
-                'whatsapp_phone.unique' => 'Ce numéro WhatsApp est déjà utilisé',
-                'current_password.required_with' => 'Le mot de passe actuel est requis pour changer le mot de passe',
+                'name.min' => 'Le nom doit contenir au moins 2 caractères',
+                'email.email' => 'Format d\'email invalide',
+                'email.unique' => 'Cet email est déjà utilisé par un autre compte',
+                'whatsapp_phone.required' => 'Le numéro WhatsApp est obligatoire',
+                'whatsapp_phone.unique' => 'Ce numéro WhatsApp est déjà utilisé par un autre compte',
+                'current_password.required_with' => 'Saisissez votre mot de passe actuel pour le modifier',
                 'new_password.min' => 'Le nouveau mot de passe doit contenir au moins 8 caractères',
-                'new_password.confirmed' => 'La confirmation du nouveau mot de passe ne correspond pas'
+                'new_password.confirmed' => 'La confirmation du nouveau mot de passe ne correspond pas',
             ]);
 
             // Si validation échoue, retourner les erreurs
             if ($validator->fails()) {
+                $firstError = collect($validator->errors()->all())->first();
+
                 return response()->json([
                     'success' => false,
-                    'message' => 'Erreur de validation',
-                    'errors' => $validator->errors()
+                    'message' => $firstError ?: 'Corrigez les informations saisies',
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             // Vérifier le mot de passe actuel si changement de mot de passe
-            if ($request->new_password && !Hash::check($request->current_password, $user->password)) {
+            if ($request->filled('new_password') && ! Hash::check($request->current_password, $user->password)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Mot de passe actuel incorrect'
-                ], 401);
+                    'message' => 'Mot de passe actuel incorrect',
+                    'errors' => ['current_password' => ['Mot de passe actuel incorrect']],
+                ], 422);
             }
 
             // Mettre à jour les champs fournis
@@ -348,7 +399,7 @@ class AuthController extends Controller
             if ($request->has('whatsapp_phone')) {
                 $user->whatsapp_phone = $request->whatsapp_phone;
             }
-            if ($request->has('new_password')) {
+            if ($request->filled('new_password')) {
                 $user->password = Hash::make($request->new_password);
             }
 
@@ -360,15 +411,7 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Profil mis à jour avec succès',
                 'data' => [
-                    'user' => [
-                        'id' => $user->id,
-                        'name' => $user->name,
-                        'email' => $user->email,
-                        'whatsapp_phone' => $user->whatsapp_phone,
-                        'role' => $user->role,
-                        'is_admin' => $user->isAdmin(),
-                        'updated_at' => $user->updated_at
-                    ]
+                    'user' => $this->userPayload($user)
                 ]
             ], 200);
 
@@ -663,6 +706,111 @@ class AuthController extends Controller
                 'success' => false,
                 'message' => 'Erreur lors de la récupération des statistiques',
                 'error' => 'Une erreur est survenue'
+            ], 500);
+        }
+    }
+
+    /**
+     * Connexion ou inscription via Google (JWT credential)
+     */
+    public function googleLogin(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'credential' => 'required|string',
+        ], [
+            'credential.required' => 'Token Google manquant',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur de validation',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $clientId = config('services.google.client_id');
+        if (!$clientId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Connexion Google non configurée sur le serveur',
+            ], 503);
+        }
+
+        try {
+            $tokenResponse = Http::get('https://oauth2.googleapis.com/tokeninfo', [
+                'id_token' => $request->credential,
+            ]);
+
+            if (!$tokenResponse->ok()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Token Google invalide ou expiré',
+                ], 401);
+            }
+
+            $payload = $tokenResponse->json();
+
+            if (($payload['aud'] ?? null) !== $clientId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Token Google non autorisé pour cette application',
+                ], 401);
+            }
+
+            if (($payload['email_verified'] ?? 'false') !== 'true') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Email Google non vérifié',
+                ], 422);
+            }
+
+            $email = $payload['email'] ?? null;
+            if (!$email) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Email Google introuvable',
+                ], 422);
+            }
+
+            $name = $payload['name'] ?? explode('@', $email)[0];
+            $user = User::where('email', $email)->first();
+
+            if (!$user) {
+                $user = User::create([
+                    'name' => $name,
+                    'email' => $email,
+                    'password' => Hash::make(Str::random(32)),
+                    'role' => 'client',
+                    'is_active' => true,
+                ]);
+            }
+
+            if (!$user->is_active) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Votre compte est désactivé. Contactez le support.',
+                ], 403);
+            }
+
+            $token = $user->createToken('auth-token', [$user->role])->plainTextToken;
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Connexion Google réussie',
+                'data' => [
+                    'user' => $this->userPayload($user),
+                    'token' => $token,
+                    'token_type' => 'Bearer',
+                    'is_new_user' => $user->wasRecentlyCreated,
+                ],
+            ], 200);
+        } catch (\Exception $e) {
+            \Log::error('Google login failed', ['error' => $e->getMessage()]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la connexion Google',
             ], 500);
         }
     }

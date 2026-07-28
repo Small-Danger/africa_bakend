@@ -37,9 +37,20 @@ class ProductController extends Controller
                 }])
                 ->where('is_active', true);
 
-            // Filtre par catégorie principale
+            // Filtre par catégorie principale (option : inclure les sous-catégories)
             if ($request->has('category_id') && $request->category_id) {
-                $query->where('category_id', $request->category_id);
+                $categoryId = (int) $request->category_id;
+                if ($request->boolean('include_subcategories')) {
+                    $categoryIds = Category::where('parent_id', $categoryId)
+                        ->pluck('id')
+                        ->push($categoryId)
+                        ->unique()
+                        ->values()
+                        ->all();
+                    $query->whereIn('category_id', $categoryIds);
+                } else {
+                    $query->where('category_id', $categoryId);
+                }
             }
 
             // Filtre par sous-catégorie (catégories enfants)
@@ -110,6 +121,7 @@ class ProductController extends Controller
                     'slug' => $product->slug,
                     'description' => Str::limit($product->description, 150),
                     'base_price' => $product->base_price,
+                    'category_id' => $product->category_id,
                     'image_main' => $product->image_main,
                     'category' => [
                         'id' => $product->category->id,
@@ -177,9 +189,20 @@ class ProductController extends Controller
                     $variantQuery->where('is_active', true);
                 }]);
 
-            // Filtre par catégorie principale
+            // Filtre par catégorie principale (option : inclure les sous-catégories)
             if ($request->has('category_id') && $request->category_id) {
-                $query->where('category_id', $request->category_id);
+                $categoryId = (int) $request->category_id;
+                if ($request->boolean('include_subcategories')) {
+                    $categoryIds = Category::where('parent_id', $categoryId)
+                        ->pluck('id')
+                        ->push($categoryId)
+                        ->unique()
+                        ->values()
+                        ->all();
+                    $query->whereIn('category_id', $categoryIds);
+                } else {
+                    $query->where('category_id', $categoryId);
+                }
             }
 
             // Filtre par sous-catégorie (catégories enfants)
