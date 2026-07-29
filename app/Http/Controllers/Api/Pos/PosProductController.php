@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Support\SearchNormalizer;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -28,13 +29,15 @@ class PosProductController extends Controller
             ->with(['product.category'])
             ->where('is_active', true)
             ->whereHas('product', fn ($q) => $q->where('is_active', true))
-            ->where(function ($q) use ($query) {
-                $q->where('barcode', $query)
-                    ->orWhere(function ($sub) use ($query) {
-                        SearchNormalizer::applyLike($sub, 'sku', $query);
-                        SearchNormalizer::applyLike($sub, 'name', $query, 'or');
-                        $sub->orWhereHas('product', function ($productQuery) use ($query) {
-                            SearchNormalizer::applyLike($productQuery, 'name', $query);
+            ->where(function (Builder $outer) use ($query) {
+                $outer->where('barcode', $query)
+                    ->orWhere(function (Builder $textSearch) use ($query) {
+                        SearchNormalizer::applyTokenSearch($textSearch, $query, function (Builder $tokenQuery, string $token) {
+                            SearchNormalizer::applyLike($tokenQuery, 'sku', $token);
+                            SearchNormalizer::applyLike($tokenQuery, 'name', $token, 'or');
+                            $tokenQuery->orWhereHas('product', function (Builder $productQuery) use ($token) {
+                                SearchNormalizer::applyLike($productQuery, 'name', $token);
+                            });
                         });
                     });
             })
@@ -50,9 +53,11 @@ class PosProductController extends Controller
                 ->with('category')
                 ->where('is_active', true)
                 ->whereDoesntHave('variants')
-                ->where(function ($q) use ($query) {
-                    SearchNormalizer::applyLike($q, 'name', $query);
-                    SearchNormalizer::applyLike($q, 'slug', $query, 'or');
+                ->where(function (Builder $productQuery) use ($query) {
+                    SearchNormalizer::applyTokenSearch($productQuery, $query, function (Builder $tokenQuery, string $token) {
+                        SearchNormalizer::applyLike($tokenQuery, 'name', $token);
+                        SearchNormalizer::applyLike($tokenQuery, 'slug', $token, 'or');
+                    });
                 })
                 ->limit(10)
                 ->get();

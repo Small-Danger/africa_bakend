@@ -5,7 +5,7 @@ namespace App\Support;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
- * Recherche insensible aux accents (ex. "ep" → "épice").
+ * Recherche insensible aux accents, par mots (ex. "epice p" → "Épices Poisson").
  */
 class SearchNormalizer
 {
@@ -33,6 +33,20 @@ class SearchNormalizer
         return strtr($text, self::accentMap());
     }
 
+    /** @return list<string> */
+    public static function tokenize(string $term): array
+    {
+        $normalized = self::normalize($term);
+        if ($normalized === '') {
+            return [];
+        }
+
+        $normalized = preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', $normalized) ?? $normalized;
+        $parts = preg_split('/\s+/u', trim($normalized), -1, PREG_SPLIT_NO_EMPTY);
+
+        return $parts ?: [];
+    }
+
     public static function normalizedColumnExpression(string $column): string
     {
         if (self::isPgsql()) {
@@ -56,26 +70,51 @@ class SearchNormalizer
     }
 
     /**
-     * Recherche produit : nom, description, variantes (nom, sku), catégorie.
+     * Chaque mot de la requête doit correspondre quelque part (nom, description, variantes, catégorie).
      */
     public static function applyProductSearch(Builder $query, string $term): Builder
     {
-        $normalized = self::normalize($term);
-        if ($normalized === '') {
+        $tokens = self::tokenize($term);
+        if ($tokens === []) {
             return $query;
         }
 
-        return $query->where(function (Builder $q) use ($term) {
-            self::applyLike($q, 'name', $term);
-            self::applyLike($q, 'description', $term, 'or');
-            $q->orWhereHas('variants', function (Builder $variantQuery) use ($term) {
-                self::applyLike($variantQuery, 'name', $term);
-                self::applyLike($variantQuery, 'sku', $term, 'or');
+        foreach ($tokens as $token) {
+            $query->where(function (Builder $q) use ($token) {
+                self::applyLike($q, 'name', $token);
+                self::applyLike($q, 'description', $token, 'or');
+                $q->orWhereHas('variants', function (Builder $variantQuery) use ($token) {
+                    self::applyLike($variantQuery, 'name', $token);
+                    self::applyLike($variantQuery, 'sku', $token, 'or');
+                });
+                $q->orWhereHas('category', function (Builder $categoryQuery) use ($token) {
+                    self::applyLike($categoryQuery, 'name', $token);
+                });
             });
-            $q->orWhereHas('category', function (Builder $categoryQuery) use ($term) {
-                self::applyLike($categoryQuery, 'name', $term);
+        }
+
+        return $query;
+    }
+
+    /**
+     * Applique la recherche par mots sur un builder (variante POS, produit simple, etc.).
+     *
+     * @param  callable(Builder, string, string): void  $applyToken
+     */
+    public static function applyTokenSearch(Builder $query, string $term, callable $applyToken): Builder
+    {
+        $tokens = self::tokenize($term);
+        if ($tokens === []) {
+            return $query;
+        }
+
+        foreach ($tokens as $token) {
+            $query->where(function (Builder $tokenQuery) use ($token, $applyToken) {
+                $applyToken($tokenQuery, $token, 'and');
             });
-        });
+        }
+
+        return $query;
     }
 
     private static function isPgsql(): bool
