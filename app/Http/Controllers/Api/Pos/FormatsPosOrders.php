@@ -35,6 +35,7 @@ trait FormatsPosOrders
                 'product_id' => $item->product_id,
                 'product_variant_id' => $item->product_variant_id,
                 'product_name' => $item->product?->name,
+                'product_image' => $item->product?->image_main,
                 'variant_name' => $item->variant?->name,
                 'quantity' => $item->quantity,
                 'unit_price' => $item->unit_price,

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\Category;
 use App\Services\CloudinaryService;
+use App\Support\SearchNormalizer;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Storage;
@@ -58,13 +59,9 @@ class ProductController extends Controller
                 $query->where('category_id', $request->subcategory_id);
             }
 
-            // Filtre par mot-clé (recherche dans le nom et la description)
+            // Filtre par mot-clé (recherche insensible aux accents)
             if ($request->has('search') && $request->search) {
-                $searchTerm = $request->search;
-                $query->where(function ($q) use ($searchTerm) {
-                    $q->where('name', 'LIKE', "%{$searchTerm}%")
-                      ->orWhere('description', 'LIKE', "%{$searchTerm}%");
-                });
+                SearchNormalizer::applyProductSearch($query, (string) $request->search);
             }
 
             // Filtre par statut (actif/inactif)
@@ -211,13 +208,9 @@ class ProductController extends Controller
                 $query->where('category_id', $request->subcategory_id);
             }
 
-            // Filtre par mot-clé (recherche dans le nom et la description)
+            // Filtre par mot-clé (recherche insensible aux accents)
             if ($request->has('search') && $request->search) {
-                $searchTerm = $request->search;
-                $query->where(function ($q) use ($searchTerm) {
-                    $q->where('name', 'LIKE', "%{$searchTerm}%")
-                      ->orWhere('description', 'LIKE', "%{$searchTerm}%");
-                });
+                SearchNormalizer::applyProductSearch($query, (string) $request->search);
             }
 
             // Filtre par statut (actif/inactif) - pour l'admin, on peut filtrer

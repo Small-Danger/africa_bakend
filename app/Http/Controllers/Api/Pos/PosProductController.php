@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Pos;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Support\SearchNormalizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -29,9 +30,13 @@ class PosProductController extends Controller
             ->whereHas('product', fn ($q) => $q->where('is_active', true))
             ->where(function ($q) use ($query) {
                 $q->where('barcode', $query)
-                    ->orWhere('sku', 'ilike', $query)
-                    ->orWhere('name', 'ilike', "%{$query}%")
-                    ->orWhereHas('product', fn ($pq) => $pq->where('name', 'ilike', "%{$query}%"));
+                    ->orWhere(function ($sub) use ($query) {
+                        SearchNormalizer::applyLike($sub, 'sku', $query);
+                        SearchNormalizer::applyLike($sub, 'name', $query, 'or');
+                        $sub->orWhereHas('product', function ($productQuery) use ($query) {
+                            SearchNormalizer::applyLike($productQuery, 'name', $query);
+                        });
+                    });
             })
             ->limit(20)
             ->get();
@@ -46,8 +51,8 @@ class PosProductController extends Controller
                 ->where('is_active', true)
                 ->whereDoesntHave('variants')
                 ->where(function ($q) use ($query) {
-                    $q->where('name', 'ilike', "%{$query}%")
-                        ->orWhere('slug', 'ilike', "%{$query}%");
+                    SearchNormalizer::applyLike($q, 'name', $query);
+                    SearchNormalizer::applyLike($q, 'slug', $query, 'or');
                 })
                 ->limit(10)
                 ->get();
