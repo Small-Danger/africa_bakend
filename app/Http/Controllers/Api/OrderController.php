@@ -209,6 +209,7 @@ class OrderController extends Controller
                     'items' => $order->items->map(function ($item) {
                         return [
                             'product_name' => $item->product->name,
+                            'product_image' => $item->product->image_main,
                             'variant_name' => $item->variant ? $item->variant->name : null,
                             'quantity' => $item->quantity,
                             'unit_price' => $item->unit_price,
@@ -303,6 +304,7 @@ class OrderController extends Controller
                             'id' => $item->id,
                             'product_id' => $item->product_id,
                             'product_name' => $item->product->name,
+                            'product_image' => $item->product->image_main,
                             'product_variant_id' => $item->product_variant_id,
                             'variant_name' => $item->variant ? $item->variant->name : null,
                             'quantity' => $item->quantity,
@@ -525,6 +527,7 @@ class OrderController extends Controller
                     'items' => $order->items->map(function ($item) {
                         return [
                             'product_name' => $item->product->name,
+                            'product_image' => $item->product->image_main,
                             'variant_name' => $item->variant ? $item->variant->name : null,
                             'quantity' => $item->quantity,
                             'unit_price' => $item->unit_price,
@@ -691,6 +694,7 @@ class OrderController extends Controller
                         return [
                             'id' => $item->id,
                             'product_name' => $item->product?->name ?? 'Produit indisponible',
+                            'product_image' => $item->product?->image_main,
                             'variant_name' => $item->variant?->name,
                             'quantity' => $item->quantity,
                             'price' => $item->unit_price,
