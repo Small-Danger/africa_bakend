@@ -96,8 +96,11 @@ class ProductController extends Controller
             // Tri des produits
             $sortBy = $request->get('sort_by', 'sort_order');
             $sortOrder = $request->get('sort_order', 'asc');
-            
-            if ($sortBy === 'price') {
+            $hasSearch = $request->filled('search');
+
+            if ($hasSearch && $sortBy === 'relevance') {
+                SearchNormalizer::applyRelevanceOrder($query, (string) $request->search);
+            } elseif ($sortBy === 'price') {
                 // Tri par prix (base_price ou prix minimum des variantes)
                 $query->orderBy('base_price', $sortOrder);
             } elseif ($sortBy === 'name') {

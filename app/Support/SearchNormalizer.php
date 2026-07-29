@@ -97,6 +97,57 @@ class SearchNormalizer
     }
 
     /**
+     * Tri par pertinence : tous les mots dans le nom d'abord, puis nom > description.
+     */
+    public static function applyRelevanceOrder(Builder $query, string $term, string $table = 'products'): Builder
+    {
+        $tokens = self::tokenize($term);
+        if ($tokens === []) {
+            return $query;
+        }
+
+        $nameExpr = self::normalizedColumnExpression("{$table}.name");
+        $descExpr = self::normalizedColumnExpression("{$table}.description");
+
+        $nameCountParts = [];
+        $nameCountBindings = [];
+        $scoreParts = [];
+        $scoreBindings = [];
+        $allInNameParts = [];
+        $allInNameBindings = [];
+
+        foreach ($tokens as $token) {
+            $like = '%' . $token . '%';
+            $prefix = $token . '%';
+
+            $nameCountParts[] = "CASE WHEN {$nameExpr} LIKE ? THEN 1 ELSE 0 END";
+            $nameCountBindings[] = $like;
+
+            $allInNameParts[] = "{$nameExpr} LIKE ?";
+            $allInNameBindings[] = $like;
+
+            $scoreParts[] = "CASE WHEN {$nameExpr} LIKE ? THEN 60 ELSE 0 END";
+            $scoreBindings[] = $prefix;
+            $scoreParts[] = "CASE WHEN {$nameExpr} LIKE ? THEN 40 ELSE 0 END";
+            $scoreBindings[] = $like;
+            $scoreParts[] = "CASE WHEN {$descExpr} LIKE ? THEN 4 ELSE 0 END";
+            $scoreBindings[] = $like;
+        }
+
+        $allInNameSql = implode(' AND ', $allInNameParts);
+        $scoreParts[] = "CASE WHEN ({$allInNameSql}) THEN 800 ELSE 0 END";
+        $scoreBindings = array_merge($scoreBindings, $allInNameBindings);
+
+        $nameCountExpr = '(' . implode(' + ', $nameCountParts) . ')';
+        $scoreExpr = '(' . implode(' + ', $scoreParts) . ')';
+
+        return $query
+            ->orderByRaw("{$nameCountExpr} DESC", $nameCountBindings)
+            ->orderByRaw("{$scoreExpr} DESC", $scoreBindings)
+            ->orderBy("{$table}.name", 'asc');
+    }
+
+    /**
      * Applique la recherche par mots sur un builder (variante POS, produit simple, etc.).
      *
      * @param  callable(Builder, string, string): void  $applyToken
