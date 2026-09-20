@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Services\StockService;
+use App\Stock\StockState;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -15,6 +17,7 @@ class ProductVariant extends Model
         'barcode',
         'price',
         'stock_quantity',
+        'reserved_quantity',
         'is_active',
         'sort_order'
     ];
@@ -22,6 +25,7 @@ class ProductVariant extends Model
     protected $casts = [
         'price' => 'decimal:2',
         'stock_quantity' => 'integer',
+        'reserved_quantity' => 'integer',
         'is_active' => 'boolean',
         'sort_order' => 'integer'
     ];
@@ -42,6 +46,11 @@ class ProductVariant extends Model
     public function cartItems(): HasMany
     {
         return $this->hasMany(CartItem::class);
+    }
+
+    public function stockMovements(): HasMany
+    {
+        return $this->hasMany(StockMovement::class);
     }
 
     // Scope pour les variantes actives
@@ -71,11 +80,7 @@ class ProductVariant extends Model
     // Méthode pour vérifier la disponibilité
     public function isAvailable(): bool
     {
-        if (is_null($this->stock_quantity)) {
-            return true; // Stock illimité
-        }
-        // 0 signifie stock illimité, > 0 signifie stock limité
-        return $this->stock_quantity >= 0;
+        return app(StockService::class)->snapshot($this)['state'] !== StockState::RUPTURE;
     }
 
     // Méthode pour obtenir le nom formaté avec SKU

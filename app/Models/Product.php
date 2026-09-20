@@ -16,12 +16,14 @@ class Product extends Model
         'category_id',
         'image_main',        // Image principale du produit
         'is_active',
+        'preorder_allowed',
         'sort_order'
     ];
 
     protected $casts = [
         'base_price' => 'decimal:2',
         'is_active' => 'boolean',
+        'preorder_allowed' => 'boolean',
         'sort_order' => 'integer'
     ];
 

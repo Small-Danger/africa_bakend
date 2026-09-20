@@ -18,6 +18,7 @@ class ActivityLog extends Model
             'team.activated' => 'Compte activé',
             'team.deactivated' => 'Compte désactivé',
             'settings.updated' => 'Paramètres mis à jour',
+            'stock.adjusted' => 'Stock corrigé',
         ];
     }
 

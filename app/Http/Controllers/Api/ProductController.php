@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\Category;
 use App\Services\CloudinaryService;
+use App\Services\StockService;
 use App\Support\SearchNormalizer;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -115,7 +116,7 @@ class ProductController extends Controller
 
             // Formater les données des produits
             $formattedProducts = $products->getCollection()->map(function ($product) {
-                return [
+                return array_merge([
                     'id' => $product->id,
                     'name' => $product->name,
                     'slug' => $product->slug,
@@ -143,7 +144,7 @@ class ProductController extends Controller
                     'sort_order' => $product->sort_order,
                     'created_at' => $product->created_at,
                     'updated_at' => $product->updated_at
-                ];
+                ], app(StockService::class)->presentProduct($product));
             });
 
             // Formater la réponse avec pagination
@@ -265,7 +266,7 @@ class ProductController extends Controller
 
             // Formater les données des produits pour l'admin
             $formattedProducts = $products->getCollection()->map(function ($product) {
-                return [
+                return array_merge([
                     'id' => $product->id,
                     'name' => $product->name,
                     'slug' => $product->slug,
@@ -293,7 +294,7 @@ class ProductController extends Controller
                     'sort_order' => $product->sort_order,
                     'created_at' => $product->created_at,
                     'updated_at' => $product->updated_at
-                ];
+                ], app(StockService::class)->presentProduct($product));
             });
 
             // Retourner la réponse avec pagination Laravel standard
@@ -385,16 +386,14 @@ class ProductController extends Controller
                 ],
                 'has_variants' => $product->hasVariants(),
                 'variants' => $product->variants->map(function ($variant) {
-                    return [
+                    return app(StockService::class)->decorate([
                         'id' => $variant->id,
                         'name' => $variant->name,
                         'sku' => $variant->sku,
                         'price' => $variant->price,
-                        'stock_quantity' => $variant->stock_quantity,
                         'is_active' => $variant->is_active,
-                        'is_available' => $variant->isAvailable(),
-                        'sort_order' => $variant->sort_order
-                    ];
+                        'sort_order' => $variant->sort_order,
+                    ], $variant, null, true);
                 }),
                 'images' => $product->images->map(function ($image) {
                     return [
@@ -424,13 +423,19 @@ class ProductController extends Controller
                 ],
                 'stock_info' => [
                     'total_variants' => $product->variants->count(),
-                    'available_variants' => $product->variants->where('stock_quantity', '>', 0)->count(),
-                    'unlimited_stock_variants' => $product->variants->whereNull('stock_quantity')->count()
+                    'available_variants' => $product->variants->filter(fn ($variant) => $variant->isAvailable())->count(),
+                    'unlimited_stock_variants' => $product->variants->whereNull('stock_quantity')->count(),
+                    'needs_inventory_variants' => $product->variants->whereNull('stock_quantity')->count(),
                 ],
                 'sort_order' => $product->sort_order,
                 'created_at' => $product->created_at,
                 'updated_at' => $product->updated_at
             ];
+
+            $formattedProduct = array_merge(
+                $formattedProduct,
+                app(StockService::class)->presentProduct($product)
+            );
 
             $result = [
                 'success' => true,
@@ -1112,7 +1117,9 @@ class ProductController extends Controller
                                 'name' => $variantData['name'],
                                 'price' => $variantData['price'],
                                 'sku' => $variantData['sku'] ?? null,
-                                'stock_quantity' => $variantData['stock_quantity'] ?? 0,
+                                'stock_quantity' => array_key_exists('stock_quantity', $variantData) && $variantData['stock_quantity'] !== ''
+                                    ? $variantData['stock_quantity']
+                                    : null,
                                 'is_active' => $variantData['is_active'] ?? true,
                                 'sort_order' => $variantData['sort_order'] ?? $index,
                                 'created_at' => now(),
@@ -1147,7 +1154,9 @@ class ProductController extends Controller
                                     'name' => $variantData['name'],
                                     'price' => $variantData['price'],
                                     'sku' => $variantData['sku'] ?? null,
-                                    'stock_quantity' => $variantData['stock_quantity'] ?? 0,
+                                    'stock_quantity' => array_key_exists('stock_quantity', $variantData) && $variantData['stock_quantity'] !== ''
+                                    ? $variantData['stock_quantity']
+                                    : null,
                                     'is_active' => $variantData['is_active'] ?? true,
                                     'sort_order' => $variantData['sort_order'] ?? $index,
                                     'created_at' => now(),

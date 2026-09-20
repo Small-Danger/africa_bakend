@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Authorization\Permissions;
 use App\Http\Controllers\Controller;
 use App\Models\CartSession;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\User;
+use App\Services\StockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -175,9 +177,14 @@ class OrderController extends Controller
                         'total_price' => $totalPrice,
                     ]);
 
-                    // Mettre à jour le stock si c'est une variante (seulement si stock limité)
-                    if ($cartItem->variant && $cartItem->variant->stock_quantity !== null && $cartItem->variant->stock_quantity > 0) {
-                        $cartItem->variant->decrement('stock_quantity', $cartItem->quantity);
+                    if ($cartItem->variant) {
+                        app(StockService::class)->commitSale(
+                            $cartItem->variant,
+                            (int) $cartItem->quantity,
+                            'site',
+                            $request->user(),
+                            $order,
+                        );
                     }
                 }
 
@@ -234,6 +241,13 @@ class OrderController extends Controller
                     ],
                 ], 201);
 
+            } catch (\InvalidArgumentException $e) {
+                DB::rollBack();
+
+                return response()->json([
+                    'success' => false,
+                    'message' => $e->getMessage(),
+                ], 422);
             } catch (\Exception $e) {
                 // Annuler la transaction en cas d'erreur
                 DB::rollBack();
@@ -495,9 +509,14 @@ class OrderController extends Controller
                         'total_price' => $totalPrice,
                     ]);
 
-                    // Mettre à jour le stock si c'est une variante (seulement si stock limité)
-                    if ($cartItem->variant && $cartItem->variant->stock_quantity !== null && $cartItem->variant->stock_quantity > 0) {
-                        $cartItem->variant->decrement('stock_quantity', $cartItem->quantity);
+                    if ($cartItem->variant) {
+                        app(StockService::class)->commitSale(
+                            $cartItem->variant,
+                            (int) $cartItem->quantity,
+                            'site',
+                            $request->user(),
+                            $order,
+                        );
                     }
                 }
 
@@ -548,8 +567,15 @@ class OrderController extends Controller
                     ],
                 ], 201);
 
+            } catch (\InvalidArgumentException $e) {
+                DB::rollBack();
+
+                return response()->json([
+                    'success' => false,
+                    'message' => $e->getMessage(),
+                ], 422);
             } catch (\Exception $e) {
-                DB::rollback();
+                DB::rollBack();
                 throw $e;
             }
 
@@ -860,15 +886,13 @@ class OrderController extends Controller
     public function updateStatus(Request $request, int $id): JsonResponse
     {
         try {
-            // Vérifier que l'utilisateur est admin
-            if (! $request->user() || ! $request->user()->hasPermissionTo(\App\Authorization\Permissions::ORDERS_VIEW)) {
+            if (! $request->user() || ! $request->user()->hasPermissionTo(Permissions::ORDERS_VIEW)) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Accès non autorisé',
                 ], 403);
             }
 
-            // Validation des données
             $validator = Validator::make($request->all(), [
                 'status' => 'required|in:en_attente,acceptée,prête,en_cours,disponible,annulée',
                 'notes' => 'nullable|string|max:1000',
@@ -878,7 +902,6 @@ class OrderController extends Controller
                 'notes.max' => 'Les notes ne peuvent pas dépasser 1000 caractères',
             ]);
 
-            // Si validation échoue, retourner les erreurs
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
@@ -887,7 +910,6 @@ class OrderController extends Controller
                 ], 422);
             }
 
-            // Récupérer la commande
             $order = Order::with(['client'])->find($id);
 
             if (! $order) {
@@ -897,15 +919,48 @@ class OrderController extends Controller
                 ], 404);
             }
 
-            // Mettre à jour le statut
-            $oldStatus = $order->status;
-            $order->status = $request->status;
+            $newStatus = (string) $request->status;
+            $cancelling = $newStatus === 'annulée';
 
-            if ($request->has('notes')) {
-                $order->notes = $request->notes;
+            if ($cancelling && ! $request->user()->hasPermissionTo(Permissions::ORDERS_CANCEL)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Vous n\'avez pas le droit d\'annuler une commande',
+                ], 403);
             }
 
-            $order->save();
+            if (! $cancelling && ! $request->user()->hasPermissionTo(Permissions::ORDERS_UPDATE_STATUS)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Accès non autorisé',
+                ], 403);
+            }
+
+            if ($cancelling && $order->status === 'annulée') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Cette commande est déjà annulée',
+                ], 422);
+            }
+
+            $oldStatus = $order->status;
+
+            DB::transaction(function () use ($request, $order, $newStatus, $cancelling) {
+                if ($cancelling) {
+                    $channel = $order->channel === 'boutique' ? 'pos' : 'site';
+                    app(StockService::class)->reverseSalesFor($order, $channel, $request->user());
+                    $order->cancelled_by = $request->user()->id;
+                    $order->cancelled_at = now();
+                }
+
+                $order->status = $newStatus;
+
+                if ($request->has('notes')) {
+                    $order->notes = $request->notes;
+                }
+
+                $order->save();
+            });
 
             // Formater la réponse
             $formattedOrder = [

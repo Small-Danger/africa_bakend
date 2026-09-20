@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Services\StockService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -45,17 +46,15 @@ class VariantController extends Controller
 
             // Formater les variantes
             $formattedVariants = $product->variants->map(function ($variant) {
-                return [
+                return $this->withStock($variant, [
                     'id' => $variant->id,
                     'name' => $variant->name,
                     'sku' => $variant->sku,
                     'price' => $variant->price,
-                    'stock_quantity' => $variant->stock_quantity,
-                    'is_available' => $variant->isAvailable(),
                     'sort_order' => $variant->sort_order,
                     'created_at' => $variant->created_at,
-                    'updated_at' => $variant->updated_at
-                ];
+                    'updated_at' => $variant->updated_at,
+                ], null, true);
             });
 
             // Formater la réponse
@@ -94,7 +93,7 @@ class VariantController extends Controller
     /**
      * [ADMIN] Récupérer toutes les variantes d'un produit (y compris inactives)
      */
-    public function adminIndex(int $product_id): JsonResponse
+    public function adminIndex(Request $request, int $product_id): JsonResponse
     {
         try {
             // Récupérer le produit avec toutes ses variantes (y compris inactives)
@@ -111,20 +110,20 @@ class VariantController extends Controller
                 ], 404);
             }
 
+            $viewer = $request->user();
+
             // Formater les variantes
-            $formattedVariants = $product->variants->map(function ($variant) {
-                return [
+            $formattedVariants = $product->variants->map(function ($variant) use ($viewer) {
+                return $this->withStock($variant, [
                     'id' => $variant->id,
                     'name' => $variant->name,
                     'sku' => $variant->sku,
                     'price' => $variant->price,
-                    'stock_quantity' => $variant->stock_quantity,
                     'is_active' => $variant->is_active,
-                    'is_available' => $variant->isAvailable(),
                     'sort_order' => $variant->sort_order,
                     'created_at' => $variant->created_at,
-                    'updated_at' => $variant->updated_at
-                ];
+                    'updated_at' => $variant->updated_at,
+                ], $viewer);
             });
 
             // Formater la réponse
@@ -178,13 +177,11 @@ class VariantController extends Controller
             }
 
             // Formater la réponse
-            $formattedVariant = [
+            $formattedVariant = $this->withStock($variant, [
                 'id' => $variant->id,
                 'name' => $variant->name,
                 'sku' => $variant->sku,
                 'price' => $variant->price,
-                'stock_quantity' => $variant->stock_quantity,
-                'is_available' => $variant->isAvailable(),
                 'sort_order' => $variant->sort_order,
                 'product' => [
                     'id' => $variant->product->id,
@@ -196,12 +193,12 @@ class VariantController extends Controller
                     'category' => [
                         'id' => $variant->product->category->id,
                         'name' => $variant->product->category->name,
-                        'slug' => $variant->product->category->slug
-                    ]
+                        'slug' => $variant->product->category->slug,
+                    ],
                 ],
                 'created_at' => $variant->created_at,
-                'updated_at' => $variant->updated_at
-            ];
+                'updated_at' => $variant->updated_at,
+            ], null, true);
 
             return response()->json([
                 'success' => true,
@@ -288,17 +285,16 @@ class VariantController extends Controller
                 'is_active' => true
             ]);
 
+            app(StockService::class)->recordOpening($variant, $request->user());
+
             // Charger les relations pour la réponse
             $variant->load(['product.category']);
 
-            // Formater la réponse
-            $formattedVariant = [
+            $formattedVariant = $this->withStock($variant, [
                 'id' => $variant->id,
                 'name' => $variant->name,
                 'sku' => $variant->sku,
                 'price' => $variant->price,
-                'stock_quantity' => $variant->stock_quantity,
-                'is_available' => $variant->isAvailable(),
                 'sort_order' => $variant->sort_order,
                 'product' => [
                     'id' => $variant->product->id,
@@ -313,7 +309,7 @@ class VariantController extends Controller
                 ],
                 'created_at' => $variant->created_at,
                 'updated_at' => $variant->updated_at
-            ];
+            ], $request->user());
 
             return response()->json([
                 'success' => true,
@@ -412,21 +408,18 @@ class VariantController extends Controller
                     $variant->sort_order = $variantData['sort_order'] ?? 0;
                     $variant->is_active = $variantData['is_active'] ?? true;
                     $variant->save();
+                    app(StockService::class)->recordOpening($variant, $request->user());
 
-                    // Formater la variante créée
-                    $formattedVariant = [
+                    $createdVariants[] = $this->withStock($variant, [
                         'id' => $variant->id,
                         'name' => $variant->name,
                         'sku' => $variant->sku,
                         'price' => $variant->price,
-                        'stock_quantity' => $variant->stock_quantity,
                         'is_active' => $variant->is_active,
                         'sort_order' => $variant->sort_order,
                         'created_at' => $variant->created_at,
-                        'updated_at' => $variant->updated_at
-                    ];
-
-                    $createdVariants[] = $formattedVariant;
+                        'updated_at' => $variant->updated_at,
+                    ], $request->user());
                 }
 
                 // Valider la transaction
@@ -542,10 +535,6 @@ class VariantController extends Controller
                 $variant->price = $request->price;
             }
 
-            if ($request->has('stock_quantity')) {
-                $variant->stock_quantity = $request->stock_quantity;
-            }
-
             if ($request->has('sort_order')) {
                 $variant->sort_order = $request->sort_order;
             }
@@ -554,17 +543,27 @@ class VariantController extends Controller
                 $variant->is_active = $request->is_active;
             }
 
-            // Sauvegarder les modifications
             $variant->save();
 
-            // Formater la réponse
-            $formattedVariant = [
+            if ($request->has('stock_quantity')) {
+                if ($request->stock_quantity === null) {
+                    $variant->stock_quantity = null;
+                    $variant->save();
+                } else {
+                    $variant = app(StockService::class)->adjust(
+                        $variant,
+                        (int) $request->stock_quantity,
+                        $request->user()
+                    );
+                    $variant->load(['product.category']);
+                }
+            }
+
+            $formattedVariant = $this->withStock($variant, [
                 'id' => $variant->id,
                 'name' => $variant->name,
                 'sku' => $variant->sku,
                 'price' => $variant->price,
-                'stock_quantity' => $variant->stock_quantity,
-                'is_available' => $variant->isAvailable(),
                 'sort_order' => $variant->sort_order,
                 'is_active' => $variant->is_active,
                 'product' => [
@@ -579,7 +578,7 @@ class VariantController extends Controller
                     ]
                 ],
                 'updated_at' => $variant->updated_at
-            ];
+            ], $request->user());
 
             return response()->json([
                 'success' => true,
@@ -659,5 +658,14 @@ class VariantController extends Controller
                 'error' => 'Une erreur est survenue'
             ], 500);
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function withStock(ProductVariant $variant, array $payload, $viewer = null, bool $public = false): array
+    {
+        return app(StockService::class)->decorate($payload, $variant, $viewer, $public);
     }
 }

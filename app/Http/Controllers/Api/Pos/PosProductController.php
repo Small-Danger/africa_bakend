@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Pos;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Services\StockService;
 use App\Support\SearchNormalizer;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
@@ -45,7 +46,7 @@ class PosProductController extends Controller
             ->get();
 
         foreach ($variants as $variant) {
-            $results[] = $this->formatVariantResult($variant);
+            $results[] = $this->formatVariantResult($variant, $request->user());
         }
 
         if ($variants->isEmpty() || !$variants->contains(fn ($v) => $v->barcode === $query)) {
@@ -73,11 +74,11 @@ class PosProductController extends Controller
         ]);
     }
 
-    private function formatVariantResult(ProductVariant $variant): array
+    private function formatVariantResult(ProductVariant $variant, $viewer = null): array
     {
         $product = $variant->product;
 
-        return [
+        return app(StockService::class)->decorate([
             'type' => 'variant',
             'product_id' => $product->id,
             'product_variant_id' => $variant->id,
@@ -87,10 +88,9 @@ class PosProductController extends Controller
             'sku' => $variant->sku,
             'barcode' => $variant->barcode,
             'price' => $variant->price,
-            'stock_quantity' => $variant->stock_quantity,
             'category' => $product->category?->name,
             'image' => $product->image_main,
-        ];
+        ], $variant, $viewer);
     }
 
     private function formatProductResult(Product $product): array

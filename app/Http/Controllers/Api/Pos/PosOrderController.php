@@ -10,10 +10,12 @@ use App\Models\OrderPayment;
 use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Services\PosClientResolver;
+use App\Services\StockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use InvalidArgumentException;
 
 class PosOrderController extends Controller
 {
@@ -135,7 +137,18 @@ class PosOrderController extends Controller
                     'total_price' => $unitPrice * $quantity,
                 ]);
 
-                $this->decrementVariantStock($item['product_variant_id'] ?? null, $quantity);
+                if (! empty($item['product_variant_id'])) {
+                    $variant = ProductVariant::find($item['product_variant_id']);
+                    if ($variant) {
+                        $this->stock()->commitSale(
+                            $variant,
+                            $quantity,
+                            'pos',
+                            $request->user(),
+                            $order,
+                        );
+                    }
+                }
             }
 
             foreach ($payments as $payment) {
@@ -155,6 +168,13 @@ class PosOrderController extends Controller
                 'message' => 'Vente enregistrée',
                 'data' => $this->formatOrder($order),
             ], 201);
+        } catch (InvalidArgumentException $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
         } catch (\Exception $e) {
             DB::rollBack();
 
@@ -195,10 +215,10 @@ class PosOrderController extends Controller
 
     public function cancel(Request $request, int $id): JsonResponse
     {
-        if (!$request->user()->isAdmin()) {
+        if (! $request->user()->hasPermissionTo(\App\Authorization\Permissions::ORDERS_CANCEL)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Seul un administrateur peut annuler une vente',
+                'message' => 'Vous n\'avez pas le droit d\'annuler une vente',
             ], 403);
         }
 
@@ -242,9 +262,7 @@ class PosOrderController extends Controller
         try {
             DB::beginTransaction();
 
-            foreach ($order->items as $item) {
-                $this->restoreVariantStock($item->product_variant_id, $item->quantity);
-            }
+            $this->stock()->reverseSalesFor($order, 'pos', $request->user());
 
             $order->update([
                 'status' => 'annulée',
@@ -292,38 +310,17 @@ class PosOrderController extends Controller
                 continue;
             }
 
-            if (!is_null($variant->stock_quantity) && $variant->stock_quantity > 0) {
-                if ($variant->stock_quantity < (int) $item['quantity']) {
-                    $label = $variant->product->name . ' — ' . $variant->name;
-                    $errors[] = "{$label} : stock insuffisant (disponible : {$variant->stock_quantity})";
-                }
+            if (!$this->stock()->canFulfillFromStock($variant, (int) $item['quantity'])) {
+                $label = $variant->product->name . ' — ' . $variant->name;
+                $errors[] = "{$label} : indisponible";
             }
         }
 
         return $errors;
     }
 
-    private function decrementVariantStock(?int $variantId, int $quantity): void
+    private function stock(): StockService
     {
-        if (!$variantId) {
-            return;
-        }
-
-        $variant = ProductVariant::lockForUpdate()->find($variantId);
-        if ($variant && !is_null($variant->stock_quantity) && $variant->stock_quantity > 0) {
-            $variant->increment('stock_quantity', -$quantity);
-        }
-    }
-
-    private function restoreVariantStock(?int $variantId, int $quantity): void
-    {
-        if (!$variantId) {
-            return;
-        }
-
-        $variant = ProductVariant::lockForUpdate()->find($variantId);
-        if ($variant && !is_null($variant->stock_quantity) && $variant->stock_quantity > 0) {
-            $variant->increment('stock_quantity', $quantity);
-        }
+        return app(StockService::class);
     }
 }
