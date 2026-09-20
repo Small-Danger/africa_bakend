@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Authorization\Permissions;
 use App\Http\Controllers\Controller;
 use App\Models\ProductVariant;
+use App\Models\StockPreorder;
 use App\Models\StockReceipt;
 use App\Models\StockReceiptItem;
 use App\Services\StockService;
@@ -40,7 +41,18 @@ class AdminStockController extends Controller
         }
 
         $stock = app(StockService::class);
-        $rows = $query->get()->map(fn (ProductVariant $variant) => $stock->presentInventory($variant, $viewer));
+        $waitingByVariant = StockPreorder::query()
+            ->waiting()
+            ->selectRaw('product_variant_id, SUM(quantity) as units')
+            ->groupBy('product_variant_id')
+            ->pluck('units', 'product_variant_id');
+
+        $rows = $query->get()->map(function (ProductVariant $variant) use ($stock, $viewer, $waitingByVariant) {
+            $row = $stock->presentInventory($variant, $viewer);
+            $row['waiting_units'] = (int) ($waitingByVariant[$variant->id] ?? 0);
+
+            return $row;
+        });
 
         $summary = [
             'total' => $rows->count(),
@@ -49,6 +61,7 @@ class AdminStockController extends Controller
             'sur_commande' => $rows->where('stock_status', StockState::SUR_COMMANDE)->count(),
             'rupture' => $rows->where('stock_status', StockState::RUPTURE)->count(),
             'low' => $rows->where('is_low', true)->count(),
+            'waiting_units' => (int) $waitingByVariant->sum(),
         ];
 
         $items = match ($status) {
@@ -128,6 +141,40 @@ class AdminStockController extends Controller
             'message' => $fromNull ? 'Inventaire enregistré' : 'Stock corrigé',
             'data' => [
                 'item' => app(StockService::class)->presentInventory($updated, $request->user()),
+            ],
+        ]);
+    }
+
+    public function preorders(Request $request): JsonResponse
+    {
+        app(StockService::class)->expireOverdueReservations();
+
+        $stock = app(StockService::class);
+        $rows = StockPreorder::query()
+            ->waiting()
+            ->with(['order.client', 'variant.product'])
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->get();
+
+        $positionByVariant = [];
+        $items = $rows->map(function (StockPreorder $row) use ($stock, &$positionByVariant) {
+            $variantId = (int) $row->product_variant_id;
+            $positionByVariant[$variantId] = ($positionByVariant[$variantId] ?? 0) + 1;
+
+            return $stock->presentQueueRow($row, $positionByVariant[$variantId]);
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'File d’attente récupérée avec succès',
+            'data' => [
+                'items' => $items->values(),
+                'summary' => [
+                    'waiting_lines' => $items->count(),
+                    'waiting_units' => (int) $items->sum('quantity'),
+                    'waiting_orders' => $items->pluck('order_id')->unique()->count(),
+                ],
             ],
         ]);
     }

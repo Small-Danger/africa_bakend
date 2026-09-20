@@ -7,7 +7,9 @@ use App\Http\Controllers\Controller;
 use App\Models\CartSession;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\ProductVariant;
 use App\Models\User;
+use App\Services\PosClientResolver;
 use App\Services\StockService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -688,7 +690,7 @@ class OrderController extends Controller
             $perPage = min(max((int) $request->input('per_page', 20), 1), 1000);
 
             // Récupérer toutes les commandes avec pagination
-            $orders = Order::with(['client', 'items.product', 'items.variant', 'reservations'])
+            $orders = Order::with(['client', 'items.product', 'items.variant', 'reservations', 'preorders'])
                 ->orderBy('created_at', 'desc')
                 ->paginate($perPage);
 
@@ -719,6 +721,7 @@ class OrderController extends Controller
                     'created_at' => $order->created_at,
                     'updated_at' => $order->updated_at,
                     'reservation' => app(StockService::class)->presentReservation($order),
+                    'preorder' => app(StockService::class)->presentPreorder($order),
                 ];
             });
 
@@ -727,6 +730,7 @@ class OrderController extends Controller
                 'message' => 'Commandes récupérées avec succès',
                 'data' => [
                     'orders' => $formattedOrders,
+                    'can_counter_preorder' => $request->user()->hasPermissionTo(Permissions::ORDERS_COUNTER_PREORDER),
                     'pagination' => [
                         'current_page' => $orders->currentPage(),
                         'last_page' => $orders->lastPage(),
@@ -788,6 +792,7 @@ class OrderController extends Controller
                 'items.product.category',
                 'items.variant',
                 'reservations',
+                'preorders',
             ])->find($id);
 
             if (! $order) {
@@ -808,6 +813,7 @@ class OrderController extends Controller
                 'whatsapp_message_id' => $order->whatsapp_message_id,
                 'channel' => $order->channel ?? 'en_ligne',
                 'reservation' => app(StockService::class)->presentReservation($order),
+                'preorder' => app(StockService::class)->presentPreorder($order),
                 'items' => $order->items->map(function ($item) {
                     $product = $item->product;
                     $category = $product?->category;
@@ -865,6 +871,130 @@ class OrderController extends Controller
                 'error' => 'Une erreur est survenue',
             ], 500);
         }
+    }
+
+    public function storeCounterPreorder(Request $request): JsonResponse
+    {
+        if (! $request->user()?->hasPermissionTo(Permissions::ORDERS_COUNTER_PREORDER)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Vous n’avez pas le droit d’enregistrer une précommande au comptoir',
+            ], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'walk_in_name' => 'required|string|max:255',
+            'walk_in_phone' => 'nullable|string|max:30',
+            'notes' => 'nullable|string|max:1000',
+            'items' => 'required|array|min:1',
+            'items.*.variant_id' => 'required|integer|exists:product_variants,id',
+            'items.*.quantity' => 'required|integer|min:1',
+        ], [
+            'walk_in_name.required' => 'Indiquez le nom du client',
+            'items.required' => 'Ajoutez au moins un article',
+            'items.min' => 'Ajoutez au moins un article',
+            'items.*.quantity.min' => 'La quantité doit être au moins 1',
+            'items.*.variant_id.exists' => 'Une variante est introuvable',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur de validation',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $merged = [];
+        foreach ($validator->validated()['items'] as $line) {
+            $variantId = (int) $line['variant_id'];
+            $merged[$variantId] = ($merged[$variantId] ?? 0) + (int) $line['quantity'];
+        }
+
+        $stock = app(StockService::class);
+
+        try {
+            $order = DB::transaction(function () use ($request, $validator, $merged, $stock) {
+                $total = 0;
+                $prepared = [];
+
+                foreach ($merged as $variantId => $quantity) {
+                    $variant = ProductVariant::query()->with('product')->find($variantId);
+                    if (! $variant || ! $variant->is_active || ! $variant->product?->is_active) {
+                        throw new \InvalidArgumentException('Un article n’est plus disponible');
+                    }
+                    if (! $stock->canFulfillFromStock($variant, $quantity)) {
+                        throw new \InvalidArgumentException(
+                            ($variant->product?->name ?? 'Produit').' · '.$variant->name.' est en rupture'
+                        );
+                    }
+
+                    $unit = (float) $variant->price;
+                    $prepared[] = [
+                        'variant' => $variant,
+                        'quantity' => $quantity,
+                        'unit_price' => $unit,
+                        'total_price' => $unit * $quantity,
+                    ];
+                    $total += $unit * $quantity;
+                }
+
+                $name = trim((string) $validator->validated()['walk_in_name']);
+                $phone = isset($validator->validated()['walk_in_phone'])
+                    ? (trim((string) $validator->validated()['walk_in_phone']) ?: null)
+                    : null;
+                $existing = $phone
+                    ? User::query()->where('role', 'client')->where('whatsapp_phone', $phone)->first()
+                    : null;
+                $clientId = $existing?->id ?: PosClientResolver::createClient($name, $phone)->id;
+
+                $order = Order::query()->create([
+                    'client_id' => $clientId,
+                    'total_amount' => $total,
+                    'status' => 'en_attente',
+                    'channel' => 'en_ligne',
+                    'walk_in_name' => $name,
+                    'walk_in_phone' => $phone,
+                    'notes' => $validator->validated()['notes'] ?? null,
+                ]);
+
+                foreach ($prepared as $line) {
+                    OrderItem::query()->create([
+                        'order_id' => $order->id,
+                        'product_id' => $line['variant']->product_id,
+                        'product_variant_id' => $line['variant']->id,
+                        'quantity' => $line['quantity'],
+                        'unit_price' => $line['unit_price'],
+                        'total_price' => $line['total_price'],
+                    ]);
+                }
+
+                $stock->reserveForOrder($order->fresh(['items.variant.product']), $request->user(), 'admin');
+
+                return $order->fresh(['client', 'items.product', 'items.variant', 'reservations', 'preorders']);
+            });
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Précommande enregistrée, le client est en file d’attente',
+            'data' => [
+                'order' => [
+                    'id' => $order->id,
+                    'order_number' => 'CMD-'.str_pad((string) $order->id, 6, '0', STR_PAD_LEFT),
+                    'status' => $order->status,
+                    'total_amount' => $order->total_amount,
+                    'client' => $this->formatOrderClient($order),
+                    'reservation' => $stock->presentReservation($order),
+                    'preorder' => $stock->presentPreorder($order),
+                ],
+            ],
+        ], 201);
     }
 
     /**
@@ -1009,7 +1139,7 @@ class OrderController extends Controller
         $client = [
             'id' => null,
             'name' => $order->walk_in_name ?? 'Client invité',
-            'whatsapp_phone' => null,
+            'whatsapp_phone' => $order->walk_in_phone,
         ];
 
         if ($includeEmail) {

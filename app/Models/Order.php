@@ -21,6 +21,7 @@ class Order extends Model
         'discount_amount',
         'discount_reason',
         'walk_in_name',
+        'walk_in_phone',
         'cancelled_by',
         'cancellation_reason',
         'cancelled_at',
@@ -63,6 +64,11 @@ class Order extends Model
     public function reservations(): HasMany
     {
         return $this->hasMany(StockReservation::class);
+    }
+
+    public function preorders(): HasMany
+    {
+        return $this->hasMany(StockPreorder::class);
     }
 
     public function cancelledByUser(): BelongsTo

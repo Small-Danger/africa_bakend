@@ -9,7 +9,7 @@ class ExpireStockReservations extends Command
 {
     protected $signature = 'stock:expire-reservations';
 
-    protected $description = 'Libère les réservations de stock non payées dont le délai est dépassé';
+    protected $description = 'Libère les réservations et précommandes non payées dont le délai est dépassé';
 
     public function handle(StockService $stock): int
     {

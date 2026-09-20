@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Models\ShopSetting;
 use App\Models\StockMovement;
+use App\Models\StockPreorder;
 use App\Models\StockReceipt;
 use App\Models\StockReceiptItem;
 use App\Models\StockReservation;
@@ -265,6 +266,7 @@ final class StockService
             $hours = max(1, (int) ShopSetting::current()->unpaid_expiry_hours);
             $expiresAt = now()->addHours($hours);
             $units = 0;
+            $queued = 0;
 
             foreach ($lockedOrder->items as $item) {
                 $variant = $item->variant;
@@ -292,32 +294,41 @@ final class StockService
                 }
 
                 $take = min($snap['available'], $requested);
-                if ($take < 1) {
-                    continue;
+                $wait = $requested - $take;
+
+                if ($wait > 0 && ! $snap['preorder_allowed']) {
+                    throw new InvalidArgumentException(
+                        $this->variantLabel($locked).' : stock insuffisant et précommande non autorisée'
+                    );
                 }
 
-                $locked->reserved_quantity = max(0, (int) ($locked->reserved_quantity ?? 0)) + $take;
-                $locked->save();
-                $units += $take;
+                if ($take > 0) {
+                    $this->addReservationUnits($lockedOrder, $locked, $take, $expiresAt, $actor, $channel);
+                    $units += $take;
+                }
 
-                StockReservation::query()->create([
-                    'order_id' => $lockedOrder->id,
-                    'product_variant_id' => $locked->id,
-                    'quantity' => $take,
-                    'status' => StockReservation::ACTIVE,
-                    'expires_at' => $expiresAt,
-                ]);
+                if ($wait > 0) {
+                    StockPreorder::query()->create([
+                        'order_id' => $lockedOrder->id,
+                        'product_variant_id' => $locked->id,
+                        'quantity' => $wait,
+                        'original_quantity' => $wait,
+                        'status' => StockPreorder::WAITING,
+                        'expires_at' => $expiresAt,
+                    ]);
+                    $queued += $wait;
 
-                $this->writeMovement(
-                    $locked,
-                    0,
-                    'reservation',
-                    $channel,
-                    $actor,
-                    $lockedOrder,
-                    'Réservation de commande',
-                    ['reserved' => $take, 'requested' => $requested, 'expires_at' => $expiresAt->toIso8601String()],
-                );
+                    $this->writeMovement(
+                        $locked,
+                        0,
+                        'precommande',
+                        $channel,
+                        $actor,
+                        $lockedOrder,
+                        'Mise en file d’attente',
+                        ['queued' => $wait, 'reserved' => $take, 'requested' => $requested],
+                    );
+                }
             }
 
             if ($units > 0) {
@@ -327,6 +338,17 @@ final class StockService
                     'Réservation de '.$units.' pièce(s) pour la commande #'.$lockedOrder->id,
                     $lockedOrder,
                     ['units' => $units, 'expires_at' => $expiresAt->toIso8601String()],
+                    $channel === 'pos' ? 'pos' : 'admin',
+                );
+            }
+
+            if ($queued > 0) {
+                ActivityLogger::record(
+                    $actor,
+                    'stock.preorder_queued',
+                    'Précommande de '.$queued.' pièce(s) en file pour la commande #'.$lockedOrder->id,
+                    $lockedOrder,
+                    ['units' => $queued, 'expires_at' => $expiresAt->toIso8601String()],
                     $channel === 'pos' ? 'pos' : 'admin',
                 );
             }
@@ -418,6 +440,8 @@ final class StockService
                 $row->save();
             }
 
+            $queued = $this->cancelPreordersFor($lockedOrder, $actor, $channel);
+
             if ($units > 0) {
                 ActivityLogger::record(
                     $actor,
@@ -428,14 +452,27 @@ final class StockService
                     $channel === 'pos' ? 'pos' : 'admin',
                 );
             }
+
+            if ($queued > 0 && $status !== StockReservation::EXPIRED) {
+                ActivityLogger::record(
+                    $actor,
+                    'stock.preorder_cancelled',
+                    'Précommande retirée de la file : '.$queued.' pièce(s) pour la commande #'.$lockedOrder->id,
+                    $lockedOrder,
+                    ['units' => $queued],
+                    $channel === 'pos' ? 'pos' : 'admin',
+                );
+            }
         });
     }
 
     public function syncOrderHold(Order $order, string $newStatus, ?User $actor = null, string $channel = 'site'): void
     {
         if ($newStatus === 'annulée') {
+            $variantIds = $this->orderVariantIds($order);
             $this->releaseReservationsFor($order, StockReservation::RELEASED, 'Annulation de commande', $actor, $channel);
             $this->reverseSalesFor($order, $channel, $actor);
+            $this->fulfillAfterStockFreed($variantIds, $actor);
 
             return;
         }
@@ -448,40 +485,58 @@ final class StockService
 
         if ($newStatus === 'acceptée') {
             $hours = max(1, (int) ShopSetting::current()->unpaid_expiry_hours);
+            $expiresAt = now()->addHours($hours);
             StockReservation::query()
                 ->where('order_id', $order->id)
                 ->where('status', StockReservation::ACTIVE)
-                ->update(['expires_at' => now()->addHours($hours)]);
+                ->update(['expires_at' => $expiresAt]);
+            StockPreorder::query()
+                ->where('order_id', $order->id)
+                ->where('status', StockPreorder::WAITING)
+                ->update(['expires_at' => $expiresAt]);
         }
     }
 
     public function expireOverdueReservations(): int
     {
-        $orderIds = StockReservation::query()
+        $reservationIds = StockReservation::query()
             ->where('status', StockReservation::ACTIVE)
             ->where('expires_at', '<=', now())
-            ->pluck('order_id')
-            ->unique()
-            ->filter()
-            ->all();
+            ->pluck('order_id');
 
+        $preorderIds = StockPreorder::query()
+            ->where('status', StockPreorder::WAITING)
+            ->where('expires_at', '<=', now())
+            ->pluck('order_id');
+
+        $orderIds = $reservationIds->merge($preorderIds)->unique()->filter()->values()->all();
+        $freedVariantIds = [];
         $count = 0;
+
         foreach ($orderIds as $orderId) {
-            DB::transaction(function () use ($orderId, &$count) {
+            DB::transaction(function () use ($orderId, &$count, &$freedVariantIds) {
                 $order = Order::query()->lockForUpdate()->find($orderId);
                 if (! $order || ! in_array($order->status, ['en_attente', 'acceptée'], true)) {
                     return;
                 }
 
-                $stillDue = StockReservation::query()
+                $reservationDue = StockReservation::query()
                     ->where('order_id', $order->id)
                     ->where('status', StockReservation::ACTIVE)
                     ->where('expires_at', '<=', now())
                     ->exists();
 
-                if (! $stillDue) {
+                $preorderDue = StockPreorder::query()
+                    ->where('order_id', $order->id)
+                    ->where('status', StockPreorder::WAITING)
+                    ->where('expires_at', '<=', now())
+                    ->exists();
+
+                if (! $reservationDue && ! $preorderDue) {
                     return;
                 }
+
+                $freedVariantIds = array_merge($freedVariantIds, $this->orderVariantIds($order));
 
                 $this->releaseReservationsFor(
                     $order,
@@ -492,12 +547,16 @@ final class StockService
                 );
 
                 $order->status = 'annulée';
-                $order->cancellation_reason = 'Réservation expirée';
+                $order->cancellation_reason = $preorderDue && ! $reservationDue
+                    ? 'Précommande expirée'
+                    : 'Réservation expirée';
                 $order->cancelled_at = now();
                 $order->save();
                 $count++;
             });
         }
+
+        $this->fulfillAfterStockFreed($freedVariantIds);
 
         return $count;
     }
@@ -529,6 +588,61 @@ final class StockService
                 StockReservation::EXPIRED => 'Réservation expirée',
                 default => $status,
             },
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function presentPreorder(Order $order): ?array
+    {
+        $order->loadMissing('preorders');
+        $rows = $order->preorders;
+        if ($rows->isEmpty()) {
+            return null;
+        }
+
+        $waiting = $rows->where('status', StockPreorder::WAITING);
+        $latest = $rows->sortByDesc('id')->first();
+        $status = $waiting->isNotEmpty() ? StockPreorder::WAITING : (string) $latest?->status;
+
+        return [
+            'status' => $status,
+            'units' => (int) $waiting->sum('quantity'),
+            'label' => match ($status) {
+                StockPreorder::WAITING => 'En file d’attente',
+                StockPreorder::ALLOCATED => 'Précommande servie',
+                StockPreorder::CANCELLED => 'Précommande annulée',
+                default => $status,
+            },
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function presentQueueRow(StockPreorder $row, int $position): array
+    {
+        $row->loadMissing(['order.client', 'variant.product']);
+        $order = $row->order;
+        $variant = $row->variant;
+        $product = $variant?->product;
+
+        return [
+            'id' => $row->id,
+            'position' => $position,
+            'order_id' => $row->order_id,
+            'order_number' => 'CMD-'.str_pad((string) $row->order_id, 6, '0', STR_PAD_LEFT),
+            'customer_name' => $order?->client?->name ?? $order?->walk_in_name ?? 'Client',
+            'customer_phone' => $order?->client?->whatsapp_phone ?? $order?->walk_in_phone,
+            'product_name' => $product?->name,
+            'variant_name' => $variant?->name,
+            'variant_id' => $row->product_variant_id,
+            'quantity' => (int) $row->quantity,
+            'original_quantity' => (int) $row->original_quantity,
+            'status' => $row->status,
+            'created_at' => optional($row->created_at)->toIso8601String(),
+            'expires_at' => optional($row->expires_at)->toIso8601String(),
         ];
     }
 
@@ -644,7 +758,7 @@ final class StockService
             throw new InvalidArgumentException('La quantité ne peut pas être négative');
         }
 
-        return DB::transaction(function () use ($variant, $newQuantity, $actor, $reason) {
+        [$updated, $increased] = DB::transaction(function () use ($variant, $newQuantity, $actor, $reason) {
             $locked = ProductVariant::query()->lockForUpdate()->findOrFail($variant->id);
             $before = $locked->stock_quantity;
             $from = $before === null ? null : (int) $before;
@@ -674,8 +788,14 @@ final class StockService
                 'admin',
             );
 
-            return $fresh;
+            return [$fresh, $newQuantity > ($from ?? 0)];
         });
+
+        if ($increased) {
+            $this->fulfillAfterStockFreed([$variant->id], $actor);
+        }
+
+        return $updated;
     }
 
     /**
@@ -697,7 +817,7 @@ final class StockService
             throw new InvalidArgumentException('Ajoutez au moins une variante avec une quantité reçue');
         }
 
-        return DB::transaction(function () use ($payload, $actor, $lines) {
+        $receipt = DB::transaction(function () use ($payload, $actor, $lines) {
             $receipt = StockReceipt::query()->create([
                 'user_id' => $actor->id,
                 'received_at' => $payload['received_at'] ?? now(),
@@ -761,6 +881,10 @@ final class StockService
 
             return $receipt;
         });
+
+        $this->fulfillAfterStockFreed(array_keys($lines), $actor);
+
+        return $receipt->fresh(['items.variant.product', 'user']);
     }
 
     /**
@@ -781,7 +905,7 @@ final class StockService
             throw new InvalidArgumentException('Ajoutez au moins une variante avec une quantité reçue');
         }
 
-        return DB::transaction(function () use ($receipt, $payload, $actor, $lines) {
+        $fresh = DB::transaction(function () use ($receipt, $payload, $actor, $lines) {
             $lockedReceipt = StockReceipt::query()->lockForUpdate()->findOrFail($receipt->id);
             $this->assertReceiptActive($lockedReceipt);
             $lockedReceipt->load('items');
@@ -866,6 +990,10 @@ final class StockService
 
             return $fresh;
         });
+
+        $this->fulfillAfterStockFreed(array_keys($lines), $actor);
+
+        return $fresh->fresh(['items.variant.product', 'user', 'cancelledBy']);
     }
 
     public function cancelReceipt(StockReceipt $receipt, User $actor, string $confirmation, ?string $reason = null): StockReceipt
@@ -1059,6 +1187,244 @@ final class StockService
                 'to' => (int) $locked->stock_quantity,
             ], $properties),
         );
+    }
+
+    /**
+     * @param  list<int>  $variantIds
+     */
+    public function fulfillAfterStockFreed(array $variantIds, ?User $actor = null): void
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $variantIds))));
+        if ($ids === []) {
+            return;
+        }
+
+        $readyIds = [];
+        DB::transaction(function () use ($ids, $actor, &$readyIds) {
+            $variants = $this->lockVariantsById($ids);
+            foreach ($variants as $variant) {
+                $readyIds = array_merge($readyIds, $this->allocateWaitingPreorders($variant, $actor));
+            }
+        });
+
+        $this->promoteAllocatedOrders(array_values(array_unique($readyIds)), $actor);
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function allocateWaitingPreorders(ProductVariant $locked, ?User $actor): array
+    {
+        if ($locked->stock_quantity === null) {
+            return [];
+        }
+
+        $leftover = $this->snapshot($locked)['available'];
+        if ($leftover < 1) {
+            return [];
+        }
+
+        $rows = StockPreorder::query()
+            ->where('product_variant_id', $locked->id)
+            ->where('status', StockPreorder::WAITING)
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get();
+
+        $readyOrderIds = [];
+        $units = 0;
+
+        foreach ($rows as $row) {
+            if ($leftover < 1) {
+                break;
+            }
+
+            $order = Order::query()->find($row->order_id);
+            if (! $order || $order->status === 'annulée') {
+                $row->status = StockPreorder::CANCELLED;
+                $row->closed_at = now();
+                $row->save();
+                continue;
+            }
+
+            $give = min((int) $row->quantity, $leftover);
+            if ($give < 1) {
+                continue;
+            }
+
+            $expiresAt = StockReservation::query()
+                ->where('order_id', $order->id)
+                ->where('status', StockReservation::ACTIVE)
+                ->min('expires_at');
+
+            $this->addReservationUnits(
+                $order,
+                $locked,
+                $give,
+                $expiresAt ? \Illuminate\Support\Carbon::parse($expiresAt) : now()->addHours(max(1, (int) ShopSetting::current()->unpaid_expiry_hours)),
+                $actor,
+                'admin',
+            );
+
+            $leftover -= $give;
+            $units += $give;
+            $row->quantity = (int) $row->quantity - $give;
+            if ($row->quantity < 1) {
+                $row->quantity = 0;
+                $row->status = StockPreorder::ALLOCATED;
+                $row->allocated_at = now();
+                $row->closed_at = now();
+            }
+            $row->save();
+
+            $stillWaiting = StockPreorder::query()
+                ->where('order_id', $order->id)
+                ->where('status', StockPreorder::WAITING)
+                ->where('quantity', '>', 0)
+                ->exists();
+
+            if (! $stillWaiting) {
+                $readyOrderIds[] = (int) $order->id;
+            }
+        }
+
+        if ($units > 0) {
+            ActivityLogger::record(
+                $actor,
+                'stock.preorder_allocated',
+                'File d’attente : '.$units.' pièce(s) attribuée(s) pour '.$this->variantLabel($locked),
+                $locked,
+                ['units' => $units, 'variant_id' => $locked->id],
+                'admin',
+            );
+        }
+
+        return $readyOrderIds;
+    }
+
+    /**
+     * @param  list<int>  $orderIds
+     */
+    private function promoteAllocatedOrders(array $orderIds, ?User $actor = null): void
+    {
+        foreach ($orderIds as $orderId) {
+            DB::transaction(function () use ($orderId, $actor) {
+                $order = Order::query()->lockForUpdate()->find($orderId);
+                if (! $order || $order->status !== 'acceptée') {
+                    return;
+                }
+
+                $stillWaiting = StockPreorder::query()
+                    ->where('order_id', $order->id)
+                    ->where('status', StockPreorder::WAITING)
+                    ->where('quantity', '>', 0)
+                    ->exists();
+
+                if ($stillWaiting) {
+                    return;
+                }
+
+                $order->status = 'prête';
+                $order->save();
+                $this->confirmReservationsFor($order, $actor, 'site');
+            });
+        }
+    }
+
+    private function addReservationUnits(
+        Order $order,
+        ProductVariant $locked,
+        int $quantity,
+        $expiresAt,
+        ?User $actor,
+        string $channel,
+    ): void {
+        if ($quantity < 1) {
+            return;
+        }
+
+        $existing = StockReservation::query()
+            ->where('order_id', $order->id)
+            ->where('product_variant_id', $locked->id)
+            ->where('status', StockReservation::ACTIVE)
+            ->first();
+
+        if ($existing) {
+            $existing->quantity = (int) $existing->quantity + $quantity;
+            $existing->save();
+        } else {
+            StockReservation::query()->create([
+                'order_id' => $order->id,
+                'product_variant_id' => $locked->id,
+                'quantity' => $quantity,
+                'status' => StockReservation::ACTIVE,
+                'expires_at' => $expiresAt,
+            ]);
+        }
+
+        $locked->reserved_quantity = max(0, (int) ($locked->reserved_quantity ?? 0)) + $quantity;
+        $locked->save();
+
+        $this->writeMovement(
+            $locked,
+            0,
+            'reservation',
+            $channel,
+            $actor,
+            $order,
+            'Réservation de commande',
+            ['reserved' => $quantity, 'expires_at' => optional($expiresAt)->toIso8601String()],
+        );
+    }
+
+    private function cancelPreordersFor(Order $order, ?User $actor, string $channel): int
+    {
+        $rows = StockPreorder::query()
+            ->where('order_id', $order->id)
+            ->where('status', StockPreorder::WAITING)
+            ->lockForUpdate()
+            ->get();
+
+        $units = 0;
+        foreach ($rows as $row) {
+            $units += (int) $row->quantity;
+            $row->status = StockPreorder::CANCELLED;
+            $row->closed_at = now();
+            $row->save();
+
+            $variant = ProductVariant::query()->find($row->product_variant_id);
+            if ($variant) {
+                $this->writeMovement(
+                    $variant,
+                    0,
+                    'precommande_annulee',
+                    $channel,
+                    $actor,
+                    $order,
+                    'Précommande retirée de la file',
+                    ['preorder_id' => $row->id, 'released' => (int) $row->quantity],
+                );
+            }
+        }
+
+        return $units;
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function orderVariantIds(Order $order): array
+    {
+        $order->loadMissing('items');
+
+        return $order->items
+            ->pluck('product_variant_id')
+            ->filter()
+            ->map(fn ($id) => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function variantLabel(ProductVariant $variant): string

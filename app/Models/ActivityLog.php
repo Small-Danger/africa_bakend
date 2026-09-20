@@ -25,6 +25,9 @@ class ActivityLog extends Model
             'stock.reserved' => 'Stock réservé',
             'stock.reservation_released' => 'Réservation libérée',
             'stock.reservation_expired' => 'Réservation expirée',
+            'stock.preorder_queued' => 'Précommande en file',
+            'stock.preorder_allocated' => 'Précommande servie',
+            'stock.preorder_cancelled' => 'Précommande annulée',
         ];
     }
 

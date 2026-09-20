@@ -137,6 +137,8 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
 
     Route::middleware('permission:orders.view')->group(function () {
         Route::get('/orders', [OrderController::class, 'adminIndex']);
+        Route::post('/orders/counter-preorder', [OrderController::class, 'storeCounterPreorder'])
+            ->middleware('permission:orders.counter_preorder');
         Route::get('/orders/{id}', [OrderController::class, 'adminShow']);
         Route::put('/orders/{id}/status', [OrderController::class, 'updateStatus']);
     });
@@ -190,6 +192,7 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
 
     Route::middleware('permission:stock.view_status')->prefix('stock')->group(function () {
         Route::get('/', [AdminStockController::class, 'index']);
+        Route::get('/preorders', [AdminStockController::class, 'preorders']);
         Route::get('/receipts', [AdminStockController::class, 'receipts'])
             ->middleware('permission:stock.view_quantities');
         Route::post('/receipts', [AdminStockController::class, 'storeReceipt'])
