@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AdminActivityController;
 use App\Http\Controllers\Api\AdminCashierController;
 use App\Http\Controllers\Api\AdminCashCloseController;
+use App\Http\Controllers\Api\AdminOrderPaymentController;
 use App\Http\Controllers\Api\AdminFinanceController;
 use App\Http\Controllers\Api\AdminSettingsController;
 use App\Http\Controllers\Api\AdminStockController;
@@ -141,6 +142,8 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
         Route::post('/orders/counter-preorder', [OrderController::class, 'storeCounterPreorder'])
             ->middleware('permission:orders.counter_preorder');
         Route::get('/orders/{id}', [OrderController::class, 'adminShow']);
+        Route::post('/orders/{id}/payments', [AdminOrderPaymentController::class, 'store'])
+            ->middleware('permission:orders.record_payment');
         Route::put('/orders/{id}/status', [OrderController::class, 'updateStatus']);
     });
 

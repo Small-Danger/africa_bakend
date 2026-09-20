@@ -9,6 +9,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\ProductVariant;
 use App\Models\User;
+use App\Services\OrderPaymentService;
 use App\Services\PosClientResolver;
 use App\Services\StockService;
 use Illuminate\Http\JsonResponse;
@@ -688,14 +689,26 @@ class OrderController extends Controller
             app(StockService::class)->expireOverdueReservations();
 
             $perPage = min(max((int) $request->input('per_page', 20), 1), 1000);
+            $payments = app(OrderPaymentService::class);
 
-            // Récupérer toutes les commandes avec pagination
-            $orders = Order::with(['client', 'items.product', 'items.variant', 'reservations', 'preorders'])
-                ->orderBy('created_at', 'desc')
-                ->paginate($perPage);
+            $query = Order::query()->with([
+                'client',
+                'items.product',
+                'items.variant',
+                'reservations',
+                'preorders',
+                'payments.recordedBy',
+            ]);
 
-            // Formater les commandes
-            $formattedOrders = $orders->getCollection()->map(function ($order) {
+            if ($request->boolean('to_validate')) {
+                $this->scopeAwaitingPayment($query);
+            } elseif ($request->filled('status')) {
+                $query->where('status', (string) $request->input('status'));
+            }
+
+            $orders = $query->orderBy('created_at', 'desc')->paginate($perPage);
+
+            $formattedOrders = $orders->getCollection()->map(function ($order) use ($payments) {
                 return [
                     'id' => $order->id,
                     'order_number' => 'CMD-'.str_pad($order->id, 6, '0', STR_PAD_LEFT),
@@ -722,6 +735,7 @@ class OrderController extends Controller
                     'updated_at' => $order->updated_at,
                     'reservation' => app(StockService::class)->presentReservation($order),
                     'preorder' => app(StockService::class)->presentPreorder($order),
+                    ...$payments->present($order),
                 ];
             });
 
@@ -731,6 +745,7 @@ class OrderController extends Controller
                 'data' => [
                     'orders' => $formattedOrders,
                     'can_counter_preorder' => $request->user()->hasPermissionTo(Permissions::ORDERS_COUNTER_PREORDER),
+                    'can_record_payment' => $request->user()->hasPermissionTo(Permissions::ORDERS_RECORD_PAYMENT),
                     'pagination' => [
                         'current_page' => $orders->currentPage(),
                         'last_page' => $orders->lastPage(),
@@ -738,7 +753,8 @@ class OrderController extends Controller
                         'total' => $orders->total(),
                     ],
                     'summary' => [
-                        'total_orders' => $orders->total(),
+                        'total_orders' => Order::query()->count(),
+                        'to_validate' => $this->scopeAwaitingPayment(Order::query())->count(),
                         'total_revenue' => Order::sum('total_amount'),
                         'status_breakdown' => [
                             'en_attente' => Order::where('status', 'en_attente')->count(),
@@ -793,6 +809,7 @@ class OrderController extends Controller
                 'items.variant',
                 'reservations',
                 'preorders',
+                'payments.recordedBy',
             ])->find($id);
 
             if (! $order) {
@@ -814,6 +831,7 @@ class OrderController extends Controller
                 'channel' => $order->channel ?? 'en_ligne',
                 'reservation' => app(StockService::class)->presentReservation($order),
                 'preorder' => app(StockService::class)->presentPreorder($order),
+                ...app(OrderPaymentService::class)->present($order),
                 'items' => $order->items->map(function ($item) {
                     $product = $item->product;
                     $category = $product?->category;
@@ -1064,6 +1082,10 @@ class OrderController extends Controller
                 ], 422);
             }
 
+            if ($newStatus === 'acceptée' && $order->status === 'en_attente') {
+                app(OrderPaymentService::class)->assertCanAccept($order);
+            }
+
             $oldStatus = $order->status;
 
             DB::transaction(function () use ($request, $order, $newStatus, $cancelling) {
@@ -1118,6 +1140,18 @@ class OrderController extends Controller
     }
 
     /**
+     * Commandes site / comptoir encore en attente et non soldées.
+     */
+    private function scopeAwaitingPayment($query)
+    {
+        return $query->where('status', 'en_attente')
+            ->where(function ($inner) {
+                $inner->whereNull('channel')->orWhere('channel', '!=', 'boutique');
+            })
+            ->whereRaw('(select coalesce(sum(amount), 0) from order_payments where order_payments.order_id = orders.id) < orders.total_amount');
+    }
+
+    /**
      * Formater les informations client d'une commande (client en ligne, invité ou caisse).
      */
     private function formatOrderClient(Order $order, bool $includeEmail = false): array
@@ -1157,18 +1191,18 @@ class OrderController extends Controller
      */
     private function generateWhatsAppMessage(Order $order): string
     {
-        $message = "🛒 *NOUVELLE COMMANDE BS SHOP*\n\n";
+        $message = "🛒 *NOUVELLE COMMANDE AFRIKRAGA*\n\n";
         $message .= '📋 *Commande #'.str_pad($order->id, 6, '0', STR_PAD_LEFT)."*\n";
-        $message .= '💰 *Total: '.number_format($order->total_amount, 2)." €*\n\n";
+        $message .= '💰 *Total: '.(int) round((float) $order->total_amount)." FCFA*\n\n";
 
         $message .= "📦 *PRODUITS COMMANDÉS:*\n";
         foreach ($order->items as $item) {
             $productName = $item->product?->name ?? 'Produit indisponible';
             $variantName = $item->variant ? ' - '.$item->variant->name : '';
             $quantity = $item->quantity;
-            $price = number_format($item->total_price, 2);
+            $price = (int) round((float) $item->total_price);
 
-            $message .= "• {$productName}{$variantName} x{$quantity} = {$price}€\n";
+            $message .= "• {$productName}{$variantName} x{$quantity} = {$price} FCFA\n";
         }
 
         $message .= "\n📝 *NOTES:* ".($order->notes ?: 'Aucune');

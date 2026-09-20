@@ -29,6 +29,7 @@ class ActivityLog extends Model
             'stock.preorder_allocated' => 'Précommande servie',
             'stock.preorder_cancelled' => 'Précommande annulée',
             'cash.closed' => 'Clôture de caisse',
+            'order.payment_recorded' => 'Paiement enregistré',
         ];
     }
 

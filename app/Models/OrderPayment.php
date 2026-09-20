@@ -11,6 +11,9 @@ class OrderPayment extends Model
         'order_id',
         'method',
         'amount',
+        'reference',
+        'note',
+        'recorded_by',
     ];
 
     protected $casts = [
@@ -20,5 +23,10 @@ class OrderPayment extends Model
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class);
+    }
+
+    public function recordedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'recorded_by');
     }
 }
