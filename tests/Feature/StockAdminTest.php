@@ -223,6 +223,19 @@ test('un admin corrige un arrivage et le stock suit la différence', function ()
     expect($variant->fresh()->stock_quantity)->toBe(22)
         ->and(StockMovement::query()->where('type', 'reception_correction')->count())->toBe(1)
         ->and(ActivityLog::query()->where('action', 'stock.receipt_updated')->count())->toBe(1);
+
+    $this->withToken($token)
+        ->putJson('/api/admin/stock/receipts/'.$created, [
+            'items' => [['variant_id' => $variant->id, 'quantity' => 15]],
+            'merchandise_cost' => 150000,
+            'shipping_cost' => 75000,
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.receipt.units', 15)
+        ->assertJsonPath('data.receipt.cancelled', false);
+
+    expect($variant->fresh()->stock_quantity)->toBe(25)
+        ->and(ActivityLog::query()->where('action', 'stock.receipt_updated')->count())->toBe(2);
 });
 
 test('un admin annule un arrivage en tapant DELETE sans effacer l’historique', function () {
