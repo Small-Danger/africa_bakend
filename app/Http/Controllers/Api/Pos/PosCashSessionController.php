@@ -4,13 +4,14 @@ namespace App\Http\Controllers\Api\Pos;
 
 use App\Http\Controllers\Controller;
 use App\Models\CashSession;
+use App\Services\CashCloseService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use InvalidArgumentException;
 
 class PosCashSessionController extends Controller
 {
-    use FormatsPosOrders;
     public function current(Request $request): JsonResponse
     {
         $session = CashSession::open()
@@ -18,7 +19,7 @@ class PosCashSessionController extends Controller
             ->latest('opened_at')
             ->first();
 
-        if (!$session) {
+        if (! $session) {
             return response()->json([
                 'success' => true,
                 'data' => null,
@@ -28,7 +29,7 @@ class PosCashSessionController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $this->formatSession($session),
+            'data' => app(CashCloseService::class)->present($session),
         ]);
     }
 
@@ -42,7 +43,7 @@ class PosCashSessionController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Une session de caisse est déjà ouverte',
-                'data' => $this->formatSession($existing),
+                'data' => app(CashCloseService::class)->present($existing),
             ], 422);
         }
 
@@ -61,7 +62,7 @@ class PosCashSessionController extends Controller
             ], 422);
         }
 
-        $session = CashSession::create([
+        $session = CashSession::query()->create([
             'cashier_id' => $request->user()->id,
             'opening_amount' => $request->opening_amount,
             'opened_at' => now(),
@@ -71,7 +72,7 @@ class PosCashSessionController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Session de caisse ouverte',
-            'data' => $this->formatSession($session),
+            'data' => app(CashCloseService::class)->present($session),
         ], 201);
     }
 
@@ -81,7 +82,7 @@ class PosCashSessionController extends Controller
             ->where('cashier_id', $request->user()->id)
             ->first();
 
-        if (!$session) {
+        if (! $session) {
             return response()->json([
                 'success' => false,
                 'message' => 'Aucune session de caisse ouverte',
@@ -91,6 +92,8 @@ class PosCashSessionController extends Controller
         $validator = Validator::make($request->all(), [
             'closing_amount_counted' => 'required|numeric|min:0',
             'notes' => 'nullable|string|max:1000',
+        ], [
+            'closing_amount_counted.required' => 'Indiquez le montant compté en caisse',
         ]);
 
         if ($validator->fails()) {
@@ -101,38 +104,24 @@ class PosCashSessionController extends Controller
             ], 422);
         }
 
-        $closingExpected = $this->calculateClosingExpected($session);
-        $closingCounted = (float) $request->closing_amount_counted;
-        $discrepancy = $closingCounted - $closingExpected;
-
-        $session->update([
-            'closing_amount_expected' => $closingExpected,
-            'closing_amount_counted' => $closingCounted,
-            'discrepancy' => $discrepancy,
-            'closed_at' => now(),
-            'notes' => $request->notes ?? $session->notes,
-        ]);
+        try {
+            $closed = app(CashCloseService::class)->close(
+                $session,
+                (int) round((float) $validator->validated()['closing_amount_counted']),
+                $validator->validated()['notes'] ?? null,
+                $request->user(),
+            );
+        } catch (InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
 
         return response()->json([
             'success' => true,
             'message' => 'Session de caisse fermée',
-            'data' => $this->formatSession($session->fresh()),
+            'data' => app(CashCloseService::class)->present($closed),
         ]);
-    }
-
-    private function formatSession(CashSession $session): array
-    {
-        return [
-            'id' => $session->id,
-            'cashier_id' => $session->cashier_id,
-            'opening_amount' => $session->opening_amount,
-            'closing_amount_expected' => $session->closing_amount_expected,
-            'closing_amount_counted' => $session->closing_amount_counted,
-            'discrepancy' => $session->discrepancy,
-            'opened_at' => $session->opened_at,
-            'closed_at' => $session->closed_at,
-            'notes' => $session->notes,
-            'is_open' => $session->isOpen(),
-        ];
     }
 }

@@ -17,6 +17,7 @@ class CashSession extends Model
         'opened_at',
         'closed_at',
         'notes',
+        'report',
     ];
 
     protected $casts = [
@@ -26,6 +27,7 @@ class CashSession extends Model
         'discrepancy' => 'decimal:2',
         'opened_at' => 'datetime',
         'closed_at' => 'datetime',
+        'report' => 'array',
     ];
 
     public function cashier(): BelongsTo
