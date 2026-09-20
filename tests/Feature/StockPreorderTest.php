@@ -138,7 +138,7 @@ test('annuler une précommande la retire de la file', function () {
         ->and($order->fresh()->status)->toBe('annulée');
 });
 
-test('une précommande expirée annule la commande même sans réservation', function () {
+test('une précommande expirée clôture la commande même sans réservation', function () {
     $variant = preorderVariant(0);
     $order = preorderOrder($variant, 2);
     $stock = app(StockService::class);
@@ -149,7 +149,7 @@ test('une précommande expirée annule la commande même sans réservation', fun
     ]);
 
     expect($stock->expireOverdueReservations())->toBe(1)
-        ->and($order->fresh()->status)->toBe('annulée')
+        ->and($order->fresh()->status)->toBe('expirée')
         ->and($order->fresh()->cancellation_reason)->toBe('Précommande expirée')
         ->and(StockPreorder::query()->where('order_id', $order->id)->value('status'))->toBe('cancelled');
 });

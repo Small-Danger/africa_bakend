@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\CashSession;
+use App\Models\Order;
 use App\Models\User;
 use InvalidArgumentException;
 
@@ -28,8 +29,8 @@ final class CashCloseService
     {
         $session->loadMissing(['orders.payments', 'movements']);
 
-        $active = $session->orders->where('channel', 'boutique')->where('status', '!=', 'annulée');
-        $cancelled = $session->orders->where('channel', 'boutique')->where('status', 'annulée');
+        $active = $session->orders->where('channel', 'boutique')->whereNotIn('status', Order::closedStatuses());
+        $cancelled = $session->orders->where('channel', 'boutique')->whereIn('status', Order::closedStatuses());
 
         $payments = $this->emptyPayments();
         foreach ($active as $order) {

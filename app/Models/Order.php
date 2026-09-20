@@ -76,6 +76,19 @@ class Order extends Model
         return $this->belongsTo(User::class, 'cancelled_by');
     }
 
+    /**
+     * @return list<string>
+     */
+    public static function closedStatuses(): array
+    {
+        return ['annulée', 'expirée'];
+    }
+
+    public function isClosed(): bool
+    {
+        return in_array($this->status, self::closedStatuses(), true);
+    }
+
     // Scope pour les commandes en attente
     public function scopePending($query)
     {

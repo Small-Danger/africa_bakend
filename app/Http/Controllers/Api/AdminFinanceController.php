@@ -56,7 +56,7 @@ class AdminFinanceController extends Controller
         $invested = $merchandise + $shipping;
 
         $salesQuery = Order::query()
-            ->where('status', '!=', 'annulée')
+            ->whereNotIn('status', Order::closedStatuses())
             ->whereBetween('created_at', [$start, $end]);
         $sales = (int) round((float) (clone $salesQuery)->sum('total_amount'));
         $ordersCount = (clone $salesQuery)->count();

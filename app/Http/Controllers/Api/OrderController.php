@@ -283,6 +283,8 @@ class OrderController extends Controller
                 ], 401);
             }
 
+            app(StockService::class)->expireOverdueReservations();
+
             // Récupérer les commandes du client avec tous les détails
             \Log::info('🔍 Recherche des commandes pour client_id:', ['client_id' => $user->id]);
 
@@ -358,6 +360,7 @@ class OrderController extends Controller
                             'en_cours' => $formattedOrders->where('status', 'en_cours')->count(),
                             'disponible' => $formattedOrders->where('status', 'disponible')->count(),
                             'annulée' => $formattedOrders->where('status', 'annulée')->count(),
+                            'expirée' => $formattedOrders->where('status', 'expirée')->count(),
                         ],
                     ],
                 ],
@@ -604,6 +607,8 @@ class OrderController extends Controller
                 ], 401);
             }
 
+            app(StockService::class)->expireOverdueReservations();
+
             // Récupérer la commande avec ses relations
             $order = Order::where('id', $id)
                 ->where('client_id', $user->id)
@@ -768,6 +773,7 @@ class OrderController extends Controller
                             'en_cours' => Order::where('status', 'en_cours')->count(),
                             'disponible' => Order::where('status', 'disponible')->count(),
                             'annulée' => Order::where('status', 'annulée')->count(),
+                            'expirée' => Order::where('status', 'expirée')->count(),
                         ],
                     ],
                 ],
@@ -1080,10 +1086,12 @@ class OrderController extends Controller
                 ], 403);
             }
 
-            if ($cancelling && $order->status === 'annulée') {
+            if ($order->isClosed()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Cette commande est déjà annulée',
+                    'message' => $order->status === 'expirée'
+                        ? 'Cette commande est expirée'
+                        : 'Cette commande est déjà annulée',
                 ], 422);
             }
 

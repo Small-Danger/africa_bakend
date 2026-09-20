@@ -46,7 +46,7 @@ final class OrderPaymentService
         $settings = ShopSetting::current();
         $percent = max(0, min(100, (int) $settings->min_deposit_percent));
         $required = (int) ceil($due * $percent / 100);
-        $cancelled = $order->status === 'annulée';
+        $closed = $order->isClosed();
 
         return [
             'payment_status' => $status,
@@ -56,7 +56,7 @@ final class OrderPaymentService
             'due_amount' => $due,
             'min_deposit_percent' => $percent,
             'min_deposit_amount' => $required,
-            'can_validate' => ! $cancelled && $paid >= $required,
+            'can_validate' => ! $closed && $paid >= $required,
         ];
     }
 
@@ -129,8 +129,12 @@ final class OrderPaymentService
             $locked = Order::query()->lockForUpdate()->findOrFail($order->id);
             $locked->load('payments');
 
-            if ($locked->status === 'annulée') {
-                throw new InvalidArgumentException('Impossible d’enregistrer un paiement sur une commande annulée');
+            if ($locked->isClosed()) {
+                throw new InvalidArgumentException(
+                    $locked->status === 'expirée'
+                        ? 'Impossible d’enregistrer un paiement sur une commande expirée'
+                        : 'Impossible d’enregistrer un paiement sur une commande annulée'
+                );
             }
 
             if (($locked->channel ?? 'en_ligne') === 'boutique') {

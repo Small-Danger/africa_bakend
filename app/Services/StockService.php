@@ -467,9 +467,15 @@ final class StockService
 
     public function syncOrderHold(Order $order, string $newStatus, ?User $actor = null, string $channel = 'site'): void
     {
-        if ($newStatus === 'annulée') {
+        if (in_array($newStatus, Order::closedStatuses(), true)) {
             $variantIds = $this->orderVariantIds($order);
-            $this->releaseReservationsFor($order, StockReservation::RELEASED, 'Annulation de commande', $actor, $channel);
+            $this->releaseReservationsFor(
+                $order,
+                $newStatus === 'expirée' ? StockReservation::EXPIRED : StockReservation::RELEASED,
+                $newStatus === 'expirée' ? 'Commande expirée' : 'Annulation de commande',
+                $actor,
+                $channel,
+            );
             $this->reverseSalesFor($order, $channel, $actor);
             $this->fulfillAfterStockFreed($variantIds, $actor);
 
@@ -498,24 +504,46 @@ final class StockService
 
     public function expireOverdueReservations(): int
     {
-        $reservationIds = StockReservation::query()
+        $hours = max(1, (int) ShopSetting::current()->unpaid_expiry_hours);
+        $cutoff = now()->subHours($hours);
+
+        $holdIds = StockReservation::query()
             ->where('status', StockReservation::ACTIVE)
             ->where('expires_at', '<=', now())
-            ->pluck('order_id');
+            ->pluck('order_id')
+            ->merge(
+                StockPreorder::query()
+                    ->where('status', StockPreorder::WAITING)
+                    ->where('expires_at', '<=', now())
+                    ->pluck('order_id')
+            );
 
-        $preorderIds = StockPreorder::query()
-            ->where('status', StockPreorder::WAITING)
-            ->where('expires_at', '<=', now())
-            ->pluck('order_id');
+        $agedIds = Order::query()
+            ->whereIn('status', ['en_attente', 'acceptée'])
+            ->where(function ($query) {
+                $query->whereNull('channel')->orWhere('channel', '!=', 'boutique');
+            })
+            ->where('created_at', '<=', $cutoff)
+            ->whereDoesntHave('payments')
+            ->pluck('id');
 
-        $orderIds = $reservationIds->merge($preorderIds)->unique()->filter()->values()->all();
+        $orderIds = $holdIds->merge($agedIds)->unique()->filter()->values()->all();
         $freedVariantIds = [];
         $count = 0;
 
         foreach ($orderIds as $orderId) {
-            DB::transaction(function () use ($orderId, &$count, &$freedVariantIds) {
+            DB::transaction(function () use ($orderId, $cutoff, &$count, &$freedVariantIds) {
                 $order = Order::query()->lockForUpdate()->find($orderId);
                 if (! $order || ! in_array($order->status, ['en_attente', 'acceptée'], true)) {
+                    return;
+                }
+
+                if (($order->channel ?? 'en_ligne') === 'boutique') {
+                    return;
+                }
+
+                $order->load('payments');
+                if ((int) round((float) $order->payments->sum('amount')) > 0) {
                     return;
                 }
 
@@ -531,7 +559,18 @@ final class StockService
                     ->where('expires_at', '<=', now())
                     ->exists();
 
-                if (! $reservationDue && ! $preorderDue) {
+                $hasActiveHold = StockReservation::query()
+                    ->where('order_id', $order->id)
+                    ->where('status', StockReservation::ACTIVE)
+                    ->exists()
+                    || StockPreorder::query()
+                        ->where('order_id', $order->id)
+                        ->where('status', StockPreorder::WAITING)
+                        ->exists();
+
+                $aged = $order->created_at && $order->created_at->lte($cutoff);
+
+                if (! $reservationDue && ! $preorderDue && ($hasActiveHold || ! $aged)) {
                     return;
                 }
 
@@ -540,17 +579,27 @@ final class StockService
                 $this->releaseReservationsFor(
                     $order,
                     StockReservation::EXPIRED,
-                    'Réservation expirée',
+                    'Commande non payée expirée',
                     null,
-                    $order->channel === 'boutique' ? 'pos' : 'site',
+                    'site',
                 );
 
-                $order->status = 'annulée';
+                $order->status = 'expirée';
                 $order->cancellation_reason = $preorderDue && ! $reservationDue
                     ? 'Précommande expirée'
-                    : 'Réservation expirée';
+                    : ($reservationDue ? 'Réservation expirée' : 'Commande non payée expirée');
                 $order->cancelled_at = now();
                 $order->save();
+
+                ActivityLogger::record(
+                    null,
+                    'order.expired',
+                    'Commande #'.$order->id.' expirée : aucun paiement dans le délai',
+                    $order,
+                    ['reason' => $order->cancellation_reason],
+                    'system',
+                );
+
                 $count++;
             });
         }
@@ -1240,7 +1289,7 @@ final class StockService
             }
 
             $order = Order::query()->find($row->order_id);
-            if (! $order || $order->status === 'annulée') {
+            if (! $order || $order->isClosed()) {
                 $row->status = StockPreorder::CANCELLED;
                 $row->closed_at = now();
                 $row->save();

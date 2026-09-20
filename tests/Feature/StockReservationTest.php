@@ -130,7 +130,7 @@ test('annuler une commande réservée libère le stock sans le recréditer', fun
         ->and($order->fresh()->status)->toBe('annulée');
 });
 
-test('une réservation expirée annule la commande et libère le stock', function () {
+test('une réservation expirée clôture la commande et libère le stock', function () {
     $variant = reservationVariant(8);
     $order = reservationOrder($variant, 3);
     $stock = app(StockService::class);
@@ -143,6 +143,6 @@ test('une réservation expirée annule la commande et libère le stock', functio
     expect($stock->expireOverdueReservations())->toBe(1)
         ->and($variant->fresh()->reserved_quantity)->toBe(0)
         ->and($variant->fresh()->stock_quantity)->toBe(8)
-        ->and($order->fresh()->status)->toBe('annulée')
+        ->and($order->fresh()->status)->toBe('expirée')
         ->and($order->fresh()->cancellation_reason)->toBe('Réservation expirée');
 });

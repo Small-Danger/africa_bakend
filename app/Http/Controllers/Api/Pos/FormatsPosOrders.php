@@ -54,7 +54,7 @@ trait FormatsPosOrders
     {
         $cashSales = $session->orders()
             ->where('channel', 'boutique')
-            ->where('status', '!=', 'annulée')
+            ->whereNotIn('status', \App\Models\Order::closedStatuses())
             ->with('payments')
             ->get()
             ->flatMap(fn ($order) => $order->payments)
