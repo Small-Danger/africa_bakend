@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AdminCashierController;
+use App\Http\Controllers\Api\AdminSettingsController;
 use App\Http\Controllers\Api\AdminTeamController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BannerController;
@@ -169,6 +170,11 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
         Route::post('/', [AdminTeamController::class, 'store']);
         Route::put('/{id}', [AdminTeamController::class, 'update']);
         Route::post('/{id}/toggle-status', [AdminTeamController::class, 'toggleStatus']);
+    });
+
+    Route::middleware('permission:settings.manage')->prefix('settings')->group(function () {
+        Route::get('/', [AdminSettingsController::class, 'show']);
+        Route::put('/', [AdminSettingsController::class, 'update']);
     });
 
     Route::prefix('banners')->middleware(['permission:banners.manage', 'large.upload'])->group(function () {
