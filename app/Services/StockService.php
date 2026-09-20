@@ -3,12 +3,14 @@
 namespace App\Services;
 
 use App\Authorization\Permissions;
+use App\Models\Order;
 use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Models\ShopSetting;
 use App\Models\StockMovement;
 use App\Models\StockReceipt;
 use App\Models\StockReceiptItem;
+use App\Models\StockReservation;
 use App\Models\User;
 use App\Stock\StockState;
 use Illuminate\Database\Eloquent\Model;
@@ -248,6 +250,286 @@ final class StockService
         }
 
         return $snap['preorder_allowed'];
+    }
+
+    public function reserveForOrder(Order $order, ?User $actor = null, string $channel = 'site'): void
+    {
+        $this->expireOverdueReservations();
+
+        DB::transaction(function () use ($order, $actor, $channel) {
+            $lockedOrder = Order::query()->lockForUpdate()->with('items.variant.product')->findOrFail($order->id);
+            if ($lockedOrder->reservations()->exists()) {
+                return;
+            }
+
+            $hours = max(1, (int) ShopSetting::current()->unpaid_expiry_hours);
+            $expiresAt = now()->addHours($hours);
+            $units = 0;
+
+            foreach ($lockedOrder->items as $item) {
+                $variant = $item->variant;
+                if (! $variant) {
+                    continue;
+                }
+
+                $requested = (int) $item->quantity;
+                if ($requested < 1) {
+                    continue;
+                }
+
+                $locked = ProductVariant::query()->lockForUpdate()->find($variant->id);
+                if (! $locked) {
+                    throw new InvalidArgumentException('Variante introuvable');
+                }
+
+                $snap = $this->snapshot($locked);
+                if ($snap['state'] === StockState::RUPTURE) {
+                    throw new InvalidArgumentException($this->variantLabel($locked).' est en rupture');
+                }
+
+                if ($snap['unlimited_legacy']) {
+                    continue;
+                }
+
+                $take = min($snap['available'], $requested);
+                if ($take < 1) {
+                    continue;
+                }
+
+                $locked->reserved_quantity = max(0, (int) ($locked->reserved_quantity ?? 0)) + $take;
+                $locked->save();
+                $units += $take;
+
+                StockReservation::query()->create([
+                    'order_id' => $lockedOrder->id,
+                    'product_variant_id' => $locked->id,
+                    'quantity' => $take,
+                    'status' => StockReservation::ACTIVE,
+                    'expires_at' => $expiresAt,
+                ]);
+
+                $this->writeMovement(
+                    $locked,
+                    0,
+                    'reservation',
+                    $channel,
+                    $actor,
+                    $lockedOrder,
+                    'Réservation de commande',
+                    ['reserved' => $take, 'requested' => $requested, 'expires_at' => $expiresAt->toIso8601String()],
+                );
+            }
+
+            if ($units > 0) {
+                ActivityLogger::record(
+                    $actor,
+                    'stock.reserved',
+                    'Réservation de '.$units.' pièce(s) pour la commande #'.$lockedOrder->id,
+                    $lockedOrder,
+                    ['units' => $units, 'expires_at' => $expiresAt->toIso8601String()],
+                    $channel === 'pos' ? 'pos' : 'admin',
+                );
+            }
+        });
+    }
+
+    public function confirmReservationsFor(Order $order, ?User $actor = null, string $channel = 'site'): void
+    {
+        DB::transaction(function () use ($order, $actor, $channel) {
+            $lockedOrder = Order::query()->lockForUpdate()->findOrFail($order->id);
+            $rows = StockReservation::query()
+                ->where('order_id', $lockedOrder->id)
+                ->where('status', StockReservation::ACTIVE)
+                ->lockForUpdate()
+                ->get();
+
+            foreach ($rows as $row) {
+                $locked = ProductVariant::query()->lockForUpdate()->find($row->product_variant_id);
+                if (! $locked || $locked->stock_quantity === null) {
+                    $row->status = StockReservation::CONFIRMED;
+                    $row->closed_at = now();
+                    $row->save();
+                    continue;
+                }
+
+                $qty = (int) $row->quantity;
+                $onHand = max(0, (int) $locked->stock_quantity);
+                $take = min($onHand, $qty);
+                $locked->stock_quantity = $onHand - $take;
+                $locked->reserved_quantity = max(0, (int) ($locked->reserved_quantity ?? 0) - $qty);
+                $locked->save();
+
+                $row->status = StockReservation::CONFIRMED;
+                $row->closed_at = now();
+                $row->save();
+
+                $this->writeMovement(
+                    $locked,
+                    -$take,
+                    $channel === 'pos' ? 'vente_pos' : 'vente_site',
+                    $channel,
+                    $actor,
+                    $lockedOrder,
+                    'Confirmation de réservation',
+                    ['reservation_id' => $row->id, 'reserved' => $qty],
+                );
+            }
+        });
+    }
+
+    public function releaseReservationsFor(
+        Order $order,
+        string $status = StockReservation::RELEASED,
+        string $reason = 'Réservation libérée',
+        ?User $actor = null,
+        string $channel = 'site',
+    ): void {
+        DB::transaction(function () use ($order, $status, $reason, $actor, $channel) {
+            $lockedOrder = Order::query()->lockForUpdate()->findOrFail($order->id);
+            $rows = StockReservation::query()
+                ->where('order_id', $lockedOrder->id)
+                ->where('status', StockReservation::ACTIVE)
+                ->lockForUpdate()
+                ->get();
+
+            $units = 0;
+            foreach ($rows as $row) {
+                $locked = ProductVariant::query()->lockForUpdate()->find($row->product_variant_id);
+                $qty = (int) $row->quantity;
+                $units += $qty;
+
+                if ($locked) {
+                    $locked->reserved_quantity = max(0, (int) ($locked->reserved_quantity ?? 0) - $qty);
+                    $locked->save();
+                    $this->writeMovement(
+                        $locked,
+                        0,
+                        $status === StockReservation::EXPIRED ? 'reservation_expiree' : 'reservation_liberee',
+                        $channel,
+                        $actor,
+                        $lockedOrder,
+                        $reason,
+                        ['reservation_id' => $row->id, 'released' => $qty],
+                    );
+                }
+
+                $row->status = $status;
+                $row->closed_at = now();
+                $row->save();
+            }
+
+            if ($units > 0) {
+                ActivityLogger::record(
+                    $actor,
+                    $status === StockReservation::EXPIRED ? 'stock.reservation_expired' : 'stock.reservation_released',
+                    $reason.' : '.$units.' pièce(s) pour la commande #'.$lockedOrder->id,
+                    $lockedOrder,
+                    ['units' => $units],
+                    $channel === 'pos' ? 'pos' : 'admin',
+                );
+            }
+        });
+    }
+
+    public function syncOrderHold(Order $order, string $newStatus, ?User $actor = null, string $channel = 'site'): void
+    {
+        if ($newStatus === 'annulée') {
+            $this->releaseReservationsFor($order, StockReservation::RELEASED, 'Annulation de commande', $actor, $channel);
+            $this->reverseSalesFor($order, $channel, $actor);
+
+            return;
+        }
+
+        if (in_array($newStatus, ['prête', 'en_cours', 'disponible'], true)) {
+            $this->confirmReservationsFor($order, $actor, $channel);
+
+            return;
+        }
+
+        if ($newStatus === 'acceptée') {
+            $hours = max(1, (int) ShopSetting::current()->unpaid_expiry_hours);
+            StockReservation::query()
+                ->where('order_id', $order->id)
+                ->where('status', StockReservation::ACTIVE)
+                ->update(['expires_at' => now()->addHours($hours)]);
+        }
+    }
+
+    public function expireOverdueReservations(): int
+    {
+        $orderIds = StockReservation::query()
+            ->where('status', StockReservation::ACTIVE)
+            ->where('expires_at', '<=', now())
+            ->pluck('order_id')
+            ->unique()
+            ->filter()
+            ->all();
+
+        $count = 0;
+        foreach ($orderIds as $orderId) {
+            DB::transaction(function () use ($orderId, &$count) {
+                $order = Order::query()->lockForUpdate()->find($orderId);
+                if (! $order || ! in_array($order->status, ['en_attente', 'acceptée'], true)) {
+                    return;
+                }
+
+                $stillDue = StockReservation::query()
+                    ->where('order_id', $order->id)
+                    ->where('status', StockReservation::ACTIVE)
+                    ->where('expires_at', '<=', now())
+                    ->exists();
+
+                if (! $stillDue) {
+                    return;
+                }
+
+                $this->releaseReservationsFor(
+                    $order,
+                    StockReservation::EXPIRED,
+                    'Réservation expirée',
+                    null,
+                    $order->channel === 'boutique' ? 'pos' : 'site',
+                );
+
+                $order->status = 'annulée';
+                $order->cancellation_reason = 'Réservation expirée';
+                $order->cancelled_at = now();
+                $order->save();
+                $count++;
+            });
+        }
+
+        return $count;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function presentReservation(Order $order): ?array
+    {
+        $order->loadMissing('reservations');
+        $rows = $order->reservations;
+        if ($rows->isEmpty()) {
+            return null;
+        }
+
+        $active = $rows->where('status', StockReservation::ACTIVE);
+        $latest = $rows->sortByDesc('id')->first();
+        $status = $active->isNotEmpty() ? StockReservation::ACTIVE : (string) $latest?->status;
+        $expires = $active->min('expires_at') ?? $rows->max('expires_at');
+
+        return [
+            'status' => $status,
+            'expires_at' => $expires ? $expires->toIso8601String() : null,
+            'units' => (int) ($active->isNotEmpty() ? $active->sum('quantity') : $rows->sum('quantity')),
+            'label' => match ($status) {
+                StockReservation::ACTIVE => 'Stock réservé',
+                StockReservation::CONFIRMED => 'Stock débité',
+                StockReservation::RELEASED => 'Réservation libérée',
+                StockReservation::EXPIRED => 'Réservation expirée',
+                default => $status,
+            },
+        ];
     }
 
     public function commitSale(

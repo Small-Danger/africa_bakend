@@ -18,6 +18,8 @@ class AdminStockController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
+        app(StockService::class)->expireOverdueReservations();
+
         $viewer = $request->user();
         $status = (string) $request->string('status');
         $search = trim((string) $request->string('search'));

@@ -22,6 +22,9 @@ class ActivityLog extends Model
             'stock.received' => 'Réception de stock',
             'stock.receipt_updated' => 'Arrivage modifié',
             'stock.receipt_cancelled' => 'Arrivage annulé',
+            'stock.reserved' => 'Stock réservé',
+            'stock.reservation_released' => 'Réservation libérée',
+            'stock.reservation_expired' => 'Réservation expirée',
         ];
     }
 

@@ -205,5 +205,7 @@ test('le journal connaît le libellé de correction de stock', function () {
         ->and(ActivityLog::actionLabels())->toHaveKey('stock.receipt_updated')
         ->and(ActivityLog::actionLabels()['stock.receipt_updated'])->toBe('Arrivage modifié')
         ->and(ActivityLog::actionLabels())->toHaveKey('stock.receipt_cancelled')
-        ->and(ActivityLog::actionLabels()['stock.receipt_cancelled'])->toBe('Arrivage annulé');
+        ->and(ActivityLog::actionLabels()['stock.receipt_cancelled'])->toBe('Arrivage annulé')
+        ->and(ActivityLog::actionLabels())->toHaveKey('stock.reserved')
+        ->and(ActivityLog::actionLabels()['stock.reserved'])->toBe('Stock réservé');
 });

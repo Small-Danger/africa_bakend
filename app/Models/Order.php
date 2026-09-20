@@ -60,6 +60,11 @@ class Order extends Model
         return $this->hasMany(OrderPayment::class);
     }
 
+    public function reservations(): HasMany
+    {
+        return $this->hasMany(StockReservation::class);
+    }
+
     public function cancelledByUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'cancelled_by');

@@ -176,17 +176,9 @@ class OrderController extends Controller
                         'unit_price' => $unitPrice,
                         'total_price' => $totalPrice,
                     ]);
-
-                    if ($cartItem->variant) {
-                        app(StockService::class)->commitSale(
-                            $cartItem->variant,
-                            (int) $cartItem->quantity,
-                            'site',
-                            $request->user(),
-                            $order,
-                        );
-                    }
                 }
+
+                app(StockService::class)->reserveForOrder($order, $request->user(), 'site');
 
                 // Vider le panier
                 $cartSession->items()->delete();
@@ -508,17 +500,9 @@ class OrderController extends Controller
                         'unit_price' => $unitPrice,
                         'total_price' => $totalPrice,
                     ]);
-
-                    if ($cartItem->variant) {
-                        app(StockService::class)->commitSale(
-                            $cartItem->variant,
-                            (int) $cartItem->quantity,
-                            'site',
-                            $request->user(),
-                            $order,
-                        );
-                    }
                 }
+
+                app(StockService::class)->reserveForOrder($order, $request->user(), 'site');
 
                 // Vider le panier
                 $cartSession->items()->delete();
@@ -699,10 +683,12 @@ class OrderController extends Controller
                 ], 403);
             }
 
+            app(StockService::class)->expireOverdueReservations();
+
             $perPage = min(max((int) $request->input('per_page', 20), 1), 1000);
 
             // Récupérer toutes les commandes avec pagination
-            $orders = Order::with(['client', 'items.product', 'items.variant'])
+            $orders = Order::with(['client', 'items.product', 'items.variant', 'reservations'])
                 ->orderBy('created_at', 'desc')
                 ->paginate($perPage);
 
@@ -732,6 +718,7 @@ class OrderController extends Controller
                     ],
                     'created_at' => $order->created_at,
                     'updated_at' => $order->updated_at,
+                    'reservation' => app(StockService::class)->presentReservation($order),
                 ];
             });
 
@@ -794,10 +781,13 @@ class OrderController extends Controller
             }
 
             // Récupérer la commande avec toutes ses relations
+            app(StockService::class)->expireOverdueReservations();
+
             $order = Order::with([
                 'client',
                 'items.product.category',
                 'items.variant',
+                'reservations',
             ])->find($id);
 
             if (! $order) {
@@ -817,6 +807,7 @@ class OrderController extends Controller
                 'notes' => $order->notes,
                 'whatsapp_message_id' => $order->whatsapp_message_id,
                 'channel' => $order->channel ?? 'en_ligne',
+                'reservation' => app(StockService::class)->presentReservation($order),
                 'items' => $order->items->map(function ($item) {
                     $product = $item->product;
                     $category = $product?->category;
@@ -946,9 +937,10 @@ class OrderController extends Controller
             $oldStatus = $order->status;
 
             DB::transaction(function () use ($request, $order, $newStatus, $cancelling) {
+                $channel = $order->channel === 'boutique' ? 'pos' : 'site';
+                app(StockService::class)->syncOrderHold($order, $newStatus, $request->user(), $channel);
+
                 if ($cancelling) {
-                    $channel = $order->channel === 'boutique' ? 'pos' : 'site';
-                    app(StockService::class)->reverseSalesFor($order, $channel, $request->user());
                     $order->cancelled_by = $request->user()->id;
                     $order->cancelled_at = now();
                 }
@@ -981,6 +973,11 @@ class OrderController extends Controller
                 'data' => $formattedOrder,
             ], 200);
 
+        } catch (\InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
