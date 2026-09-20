@@ -53,8 +53,23 @@ test('un stock null reste à inventorier et n’est pas converti en 0', function
     expect($variant->fresh()->stock_quantity)->toBeNull()
         ->and($snap['unlimited_legacy'])->toBeTrue()
         ->and($snap['needs_inventory'])->toBeTrue()
-        ->and($snap['state'])->toBe(StockState::EN_STOCK)
-        ->and($snap['label'])->toBe('En stock (à inventorier)');
+        ->and($snap['state'])->toBe(StockState::SUR_COMMANDE)
+        ->and($snap['label'])->toBe('Sur commande');
+});
+
+test('un stock jamais compté s’affiche sur commande côté boutique', function () {
+    $variant = makeCatalogVariant(['stock_quantity' => null, 'preorder_allowed' => true]);
+
+    $this->getJson('/api/products')
+        ->assertOk()
+        ->assertJsonPath('data.products.0.stock_status', StockState::SUR_COMMANDE)
+        ->assertJsonPath('data.products.0.stock_label', 'Sur commande');
+
+    $this->getJson('/api/products/'.$variant->product_id)
+        ->assertOk()
+        ->assertJsonPath('data.stock_status', StockState::SUR_COMMANDE)
+        ->assertJsonPath('data.variants.0.stock_status', StockState::SUR_COMMANDE)
+        ->assertJsonPath('data.variants.0.stock_label', 'Sur commande');
 });
 
 test('zéro avec précommande autorisée donne sur commande', function () {

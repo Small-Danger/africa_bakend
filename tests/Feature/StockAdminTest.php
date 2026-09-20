@@ -122,6 +122,8 @@ test('le filtre à inventorier ne retourne que les stocks nuls', function () {
         ->assertOk()
         ->assertJsonPath('data.summary.needs_inventory', 1)
         ->assertJsonPath('data.items.0.needs_inventory', true)
+        ->assertJsonPath('data.items.0.stock_status', StockState::SUR_COMMANDE)
+        ->assertJsonPath('data.items.0.stock_label', 'Sur commande')
         ->assertJsonPath('data.items.0.product_name', 'Savon noir');
 });
 

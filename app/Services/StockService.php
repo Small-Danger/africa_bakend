@@ -47,14 +47,19 @@ final class StockService
         $threshold = (int) $settings->low_stock_threshold;
 
         if ($unlimitedLegacy) {
-            $state = StockState::EN_STOCK;
-            $label = 'En stock (à inventorier)';
+            if ($preorderAllowed) {
+                $state = StockState::SUR_COMMANDE;
+                $label = 'Sur commande';
+            } else {
+                $state = StockState::RUPTURE;
+                $label = 'Indisponible';
+            }
         } elseif ($available > 0) {
             $state = StockState::EN_STOCK;
             $label = $available <= $threshold ? 'Plus que '.$available : 'En stock';
         } elseif ($preorderAllowed) {
             $state = StockState::SUR_COMMANDE;
-            $label = 'Pas en stock, commandable, disponible sous '.$delay.' jours';
+            $label = 'Sur commande';
         } else {
             $state = StockState::RUPTURE;
             $label = 'Indisponible';
@@ -132,8 +137,8 @@ final class StockService
 
         if ($variants->isEmpty()) {
             return [
-                'stock_status' => StockState::EN_STOCK,
-                'stock_label' => 'En stock',
+                'stock_status' => StockState::SUR_COMMANDE,
+                'stock_label' => 'Sur commande',
                 'needs_inventory' => true,
                 'is_available' => true,
             ];
@@ -142,13 +147,10 @@ final class StockService
         $snaps = $variants->map(fn (ProductVariant $variant) => $this->snapshot($variant));
 
         if ($snaps->contains(fn (array $snap) => $snap['state'] === StockState::EN_STOCK)) {
-            $inStock = $snaps->filter(fn (array $snap) => $snap['state'] === StockState::EN_STOCK);
-            $needsInventory = $inStock->every(fn (array $snap) => $snap['needs_inventory']);
-
             return [
                 'stock_status' => StockState::EN_STOCK,
-                'stock_label' => $needsInventory ? 'En stock (à inventorier)' : 'En stock',
-                'needs_inventory' => $needsInventory,
+                'stock_label' => 'En stock',
+                'needs_inventory' => false,
                 'is_available' => true,
             ];
         }
@@ -185,12 +187,13 @@ final class StockService
             && $snap['available'] <= $snap['low_stock_threshold'];
 
         $label = $showQty
-            ? ($snap['needs_inventory'] ? 'À inventorier' : $snap['label'])
+            ? ($snap['needs_inventory']
+                ? ($snap['state'] === StockState::SUR_COMMANDE ? 'Sur commande' : $snap['label'])
+                : $snap['label'])
             : match (true) {
-                $snap['needs_inventory'] => 'À inventorier',
-                $isLow => 'Stock faible',
                 $snap['state'] === StockState::SUR_COMMANDE => 'Sur commande',
                 $snap['state'] === StockState::RUPTURE => 'Indisponible',
+                $isLow => 'Stock faible',
                 default => 'En stock',
             };
 
@@ -287,10 +290,6 @@ final class StockService
                 $snap = $this->snapshot($locked);
                 if ($snap['state'] === StockState::RUPTURE) {
                     throw new InvalidArgumentException($this->variantLabel($locked).' est en rupture');
-                }
-
-                if ($snap['unlimited_legacy']) {
-                    continue;
                 }
 
                 $take = min($snap['available'], $requested);
