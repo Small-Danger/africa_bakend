@@ -95,6 +95,28 @@ final class OrderPaymentService
         ];
     }
 
+    /**
+     * @return array<string, mixed>
+     */
+    public function presentForClient(Order $order): array
+    {
+        $full = $this->present($order);
+
+        return [
+            'payment_status' => $full['payment_status'],
+            'payment_status_label' => $full['payment_status_label'],
+            'paid_amount' => $full['paid_amount'],
+            'balance' => $full['balance'],
+            'due_amount' => $full['due_amount'],
+            'payments' => collect($full['payments'])->map(fn (array $payment) => [
+                'method' => $payment['method'],
+                'method_label' => $payment['method_label'],
+                'amount' => $payment['amount'],
+                'created_at' => $payment['created_at'],
+            ])->values()->all(),
+        ];
+    }
+
     public function record(
         Order $order,
         User $actor,

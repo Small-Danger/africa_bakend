@@ -142,4 +142,32 @@ class ShopSetting extends Model
             'notify_email' => (bool) $this->notify_email,
         ];
     }
+
+    /**
+     * Coordonnées publiques pour le paiement WhatsApp.
+     *
+     * @return array<string, mixed>
+     */
+    public function toPublicContact(): array
+    {
+        $raw = trim((string) ($this->whatsapp_number ?: '+22663126849'));
+        $digits = preg_replace('/\D+/', '', $raw) ?: '22663126849';
+        $enabled = array_values(array_intersect(
+            self::paymentMethodKeys(),
+            is_array($this->payment_methods) && $this->payment_methods !== []
+                ? $this->payment_methods
+                : self::paymentMethodKeys()
+        ));
+
+        return [
+            'whatsapp_number' => $raw,
+            'whatsapp_link' => $digits,
+            'whatsapp_display' => $raw,
+            'min_deposit_percent' => (int) $this->min_deposit_percent,
+            'payment_methods' => collect($enabled)->map(fn (string $key) => [
+                'key' => $key,
+                'label' => self::paymentMethodLabels()[$key] ?? $key,
+            ])->values()->all(),
+        ];
+    }
 }

@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\Pos\PosOrderController;
 use App\Http\Controllers\Api\Pos\PosPinController;
 use App\Http\Controllers\Api\Pos\PosProductController;
 use App\Http\Controllers\Api\ProductController;
+use App\Http\Controllers\Api\ShopContactController;
 use App\Http\Controllers\Api\SuggestionController;
 use App\Http\Controllers\Api\VariantController;
 use Illuminate\Support\Facades\Route;
@@ -86,6 +87,8 @@ Route::get('/suggestions/cart', [SuggestionController::class, 'getCartSuggestion
 Route::get('/suggestions/products/{productId}/similar', [SuggestionController::class, 'getSimilarProducts']);
 
 // Commandes (création côté client - sans authentification pour inscription rapide)
+Route::get('/shop/contact', [ShopContactController::class, 'show']);
+
 Route::post('/orders/guest', [OrderController::class, 'storeGuest']);
 
 // Commandes (création et consultation côté client - avec authentification)

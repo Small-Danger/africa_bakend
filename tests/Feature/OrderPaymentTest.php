@@ -171,6 +171,41 @@ test('la file à valider ignore les ventes de caisse et les commandes soldées',
         ->and($list->json('data.can_record_payment'))->toBeTrue();
 });
 
+test('le client voit le statut de paiement de sa commande', function () {
+    $client = User::factory()->create();
+    $order = paymentOrder(paymentVariant(), 10000);
+    $order->client_id = $client->id;
+    $order->save();
+
+    $this->actingAs($client, 'sanctum')
+        ->getJson('/api/orders/'.$order->id)
+        ->assertOk()
+        ->assertJsonPath('data.payment_status', 'non_paye')
+        ->assertJsonPath('data.balance', 10000);
+
+    $admin = User::factory()->admin()->create();
+    $this->actingAs($admin, 'sanctum')
+        ->postJson('/api/admin/orders/'.$order->id.'/payments', [
+            'method' => 'wave',
+            'amount' => 4000,
+        ])
+        ->assertCreated();
+
+    $this->actingAs($client, 'sanctum')
+        ->getJson('/api/orders/'.$order->id)
+        ->assertOk()
+        ->assertJsonPath('data.payment_status', 'partiel')
+        ->assertJsonPath('data.paid_amount', 4000)
+        ->assertJsonPath('data.balance', 6000);
+});
+
+test('les coordonnées boutique sont publiques', function () {
+    $this->getJson('/api/shop/contact')
+        ->assertOk()
+        ->assertJsonPath('success', true)
+        ->assertJsonPath('data.whatsapp_link', '22663126849');
+});
+
 test('une vente boutique refuse un paiement admin', function () {
     $admin = User::factory()->admin()->create();
     $order = paymentOrder(paymentVariant(), 4000, 'boutique');

@@ -190,7 +190,7 @@ class OrderController extends Controller
                 DB::commit();
 
                 // Charger les relations pour la réponse
-                $order->load(['items.product', 'items.variant', 'client']);
+                $order->load(['items.product', 'items.variant', 'client', 'payments']);
 
                 // Formater la réponse
                 $formattedOrder = [
@@ -199,6 +199,7 @@ class OrderController extends Controller
                     'status' => $order->status,
                     'total_amount' => $order->total_amount,
                     'notes' => $order->notes,
+                    ...app(OrderPaymentService::class)->presentForClient($order),
                     'client_info' => [
                         'id' => $order->client_id,
                         'name' => $order->client->name,
@@ -290,6 +291,7 @@ class OrderController extends Controller
                     'items.product.category',
                     'items.variant',
                     'client',
+                    'payments',
                 ])
                 ->orderBy('created_at', 'desc')
                 ->get();
@@ -306,6 +308,7 @@ class OrderController extends Controller
                     'status' => $order->status,
                     'total_amount' => $order->total_amount,
                     'notes' => $order->notes,
+                    ...app(OrderPaymentService::class)->presentForClient($order),
                     'items' => $order->items->map(function ($item) {
                         return [
                             'id' => $item->id,
@@ -514,7 +517,7 @@ class OrderController extends Controller
                 DB::commit();
 
                 // Charger les relations pour la réponse
-                $order->load(['items.product', 'items.variant', 'client']);
+                $order->load(['items.product', 'items.variant', 'client', 'payments']);
 
                 // Formater la réponse
                 $formattedOrder = [
@@ -523,6 +526,7 @@ class OrderController extends Controller
                     'status' => $order->status,
                     'total_amount' => $order->total_amount,
                     'notes' => $order->notes,
+                    ...app(OrderPaymentService::class)->presentForClient($order),
                     'client_info' => [
                         'id' => $order->client_id,
                         'name' => $order->client->name,
@@ -603,7 +607,7 @@ class OrderController extends Controller
             // Récupérer la commande avec ses relations
             $order = Order::where('id', $id)
                 ->where('client_id', $user->id)
-                ->with(['items.product.category', 'items.variant'])
+                ->with(['items.product.category', 'items.variant', 'payments'])
                 ->first();
 
             if (! $order) {
@@ -620,6 +624,7 @@ class OrderController extends Controller
                 'status' => $order->status,
                 'total_amount' => $order->total_amount,
                 'notes' => $order->notes,
+                ...app(OrderPaymentService::class)->presentForClient($order),
                 'items' => $order->items->map(function ($item) {
                     return [
                         'id' => $item->id,
