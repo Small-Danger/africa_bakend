@@ -7,6 +7,8 @@ use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Models\ShopSetting;
 use App\Models\StockMovement;
+use App\Models\StockReceipt;
+use App\Models\StockReceiptItem;
 use App\Models\User;
 use App\Stock\StockState;
 use Illuminate\Database\Eloquent\Model;
@@ -392,6 +394,140 @@ final class StockService
 
             return $fresh;
         });
+    }
+
+    /**
+     * Réception d'un arrivage : on ajoute la quantité, on n'écrase jamais un compte.
+     *
+     * @param  array{
+     *     items: list<array{variant_id:int, quantity:int, unit_cost?:int|null}>,
+     *     note?: string|null,
+     *     merchandise_cost?: int,
+     *     shipping_cost?: int,
+     *     received_at?: \DateTimeInterface|string|null
+     * }  $payload
+     */
+    public function receiveReceipt(array $payload, User $actor): StockReceipt
+    {
+        $lines = [];
+        foreach ($payload['items'] ?? [] as $line) {
+            $variantId = (int) ($line['variant_id'] ?? 0);
+            $quantity = (int) ($line['quantity'] ?? 0);
+            if ($variantId < 1 || $quantity < 1) {
+                continue;
+            }
+            $lines[$variantId]['quantity'] = ($lines[$variantId]['quantity'] ?? 0) + $quantity;
+            if (array_key_exists('unit_cost', $line) && $line['unit_cost'] !== null && $line['unit_cost'] !== '') {
+                $lines[$variantId]['unit_cost'] = (int) $line['unit_cost'];
+            }
+        }
+
+        if ($lines === []) {
+            throw new InvalidArgumentException('Ajoutez au moins une variante avec une quantité reçue');
+        }
+
+        return DB::transaction(function () use ($payload, $actor, $lines) {
+            $receipt = StockReceipt::query()->create([
+                'user_id' => $actor->id,
+                'received_at' => $payload['received_at'] ?? now(),
+                'note' => isset($payload['note']) ? (trim((string) $payload['note']) ?: null) : null,
+                'merchandise_cost' => max(0, (int) ($payload['merchandise_cost'] ?? 0)),
+                'shipping_cost' => max(0, (int) ($payload['shipping_cost'] ?? 0)),
+            ]);
+
+            $units = 0;
+            foreach ($lines as $variantId => $line) {
+                $locked = ProductVariant::query()->lockForUpdate()->find($variantId);
+                if (! $locked) {
+                    throw new InvalidArgumentException('Variante introuvable');
+                }
+
+                $qty = (int) $line['quantity'];
+                $before = $locked->stock_quantity;
+                $from = $before === null ? 0 : (int) $before;
+                $locked->stock_quantity = $from + $qty;
+                $locked->save();
+                $units += $qty;
+
+                $item = StockReceiptItem::query()->create([
+                    'stock_receipt_id' => $receipt->id,
+                    'product_variant_id' => $locked->id,
+                    'quantity' => $qty,
+                    'unit_cost' => $line['unit_cost'] ?? null,
+                ]);
+
+                $this->writeMovement(
+                    $locked,
+                    $qty,
+                    'reception',
+                    'admin',
+                    $actor,
+                    $receipt,
+                    $receipt->note ?: 'Réception de stock',
+                    [
+                        'from' => $before,
+                        'to' => (int) $locked->stock_quantity,
+                        'receipt_item_id' => $item->id,
+                    ],
+                );
+            }
+
+            $receipt->load(['items.variant.product', 'user']);
+
+            ActivityLogger::record(
+                $actor,
+                'stock.received',
+                'Réception de '.$units.' pièce(s) sur '.$receipt->items->count().' variante(s)',
+                $receipt,
+                [
+                    'units' => $units,
+                    'lines' => $receipt->items->count(),
+                    'merchandise_cost' => $receipt->merchandise_cost,
+                    'shipping_cost' => $receipt->shipping_cost,
+                ],
+                'admin',
+            );
+
+            return $receipt;
+        });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function presentReceipt(StockReceipt $receipt, User $viewer): array
+    {
+        $showMoney = $viewer->hasPermissionTo(Permissions::FINANCE_VIEW);
+        $units = (int) $receipt->items->sum('quantity');
+
+        $payload = [
+            'id' => $receipt->id,
+            'received_at' => optional($receipt->received_at)->toIso8601String(),
+            'note' => $receipt->note,
+            'units' => $units,
+            'lines_count' => $receipt->items->count(),
+            'actor_name' => $receipt->user?->name,
+            'items' => $receipt->items->map(function (StockReceiptItem $item) {
+                $variant = $item->variant;
+                $product = $variant?->product;
+
+                return [
+                    'id' => $item->id,
+                    'variant_id' => $item->product_variant_id,
+                    'product_name' => $product?->name,
+                    'variant_name' => $variant?->name,
+                    'quantity' => $item->quantity,
+                ];
+            })->values()->all(),
+        ];
+
+        if ($showMoney) {
+            $payload['merchandise_cost'] = (int) $receipt->merchandise_cost;
+            $payload['shipping_cost'] = (int) $receipt->shipping_cost;
+            $payload['invested'] = $receipt->invested();
+        }
+
+        return $payload;
     }
 
     /**

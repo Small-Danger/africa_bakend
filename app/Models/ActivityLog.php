@@ -19,6 +19,7 @@ class ActivityLog extends Model
             'team.deactivated' => 'Compte désactivé',
             'settings.updated' => 'Paramètres mis à jour',
             'stock.adjusted' => 'Stock corrigé',
+            'stock.received' => 'Réception de stock',
         ];
     }
 

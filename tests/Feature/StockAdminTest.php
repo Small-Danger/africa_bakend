@@ -4,6 +4,7 @@ use App\Models\ActivityLog;
 use App\Models\Category;
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Models\StockMovement;
 use App\Models\User;
 use App\Stock\StockState;
 use Database\Seeders\RolePermissionSeeder;
@@ -123,3 +124,73 @@ test('le filtre à inventorier ne retourne que les stocks nuls', function () {
         ->assertJsonPath('data.items.0.needs_inventory', true)
         ->assertJsonPath('data.items.0.product_name', 'Savon noir');
 });
+
+test('un admin réceptionne un arrivage et le stock augmente', function () {
+    $variant = stockPageVariant(['stock_quantity' => 10, 'product_name' => 'Savon noir']);
+    $admin = User::factory()->admin()->create();
+
+    $this->withToken($admin->createToken('test')->plainTextToken)
+        ->postJson('/api/admin/stock/receipts', [
+            'items' => [['variant_id' => $variant->id, 'quantity' => 20]],
+            'merchandise_cost' => 200000,
+            'shipping_cost' => 75000,
+            'note' => 'Camion du 20 septembre',
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.receipt.units', 20)
+        ->assertJsonPath('data.receipt.merchandise_cost', 200000)
+        ->assertJsonPath('data.receipt.shipping_cost', 75000)
+        ->assertJsonPath('data.receipt.invested', 275000);
+
+    expect($variant->fresh()->stock_quantity)->toBe(30)
+        ->and(StockMovement::query()->where('type', 'reception')->count())->toBe(1)
+        ->and(ActivityLog::query()->where('action', 'stock.received')->count())->toBe(1);
+});
+
+test('une réception sur un stock null le sort de à inventorier', function () {
+    $variant = stockPageVariant(['stock_quantity' => null]);
+    $admin = User::factory()->admin()->create();
+
+    $this->withToken($admin->createToken('test')->plainTextToken)
+        ->postJson('/api/admin/stock/receipts', [
+            'items' => [['variant_id' => $variant->id, 'quantity' => 8]],
+        ])
+        ->assertCreated();
+
+    expect($variant->fresh()->stock_quantity)->toBe(8);
+});
+
+test('une secrétaire ne peut pas enregistrer une réception', function () {
+    $variant = stockPageVariant();
+    $secretaire = User::factory()->secretaire()->create();
+
+    $this->withToken($secretaire->createToken('test')->plainTextToken)
+        ->postJson('/api/admin/stock/receipts', [
+            'items' => [['variant_id' => $variant->id, 'quantity' => 5]],
+        ])
+        ->assertForbidden();
+
+    expect($variant->fresh()->stock_quantity)->toBe(10);
+});
+
+test('le résumé du mois additionne marchandise et transport', function () {
+    $variant = stockPageVariant();
+    $admin = User::factory()->admin()->create();
+    $token = $admin->createToken('test')->plainTextToken;
+
+    $this->withToken($token)
+        ->postJson('/api/admin/stock/receipts', [
+            'items' => [['variant_id' => $variant->id, 'quantity' => 2]],
+            'merchandise_cost' => 200000,
+            'shipping_cost' => 75000,
+        ])
+        ->assertCreated();
+
+    $this->withToken($token)
+        ->getJson('/api/admin/stock/receipts')
+        ->assertOk()
+        ->assertJsonPath('data.summary.invested', 275000)
+        ->assertJsonPath('data.summary.units_received', 2)
+        ->assertJsonPath('data.items.0.invested', 275000);
+});
+

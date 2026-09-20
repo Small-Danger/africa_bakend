@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Authorization\Permissions;
 use App\Http\Controllers\Controller;
 use App\Models\ProductVariant;
+use App\Models\StockReceipt;
+use App\Models\StockReceiptItem;
 use App\Services\StockService;
 use App\Stock\StockState;
 use Illuminate\Http\JsonResponse;
@@ -126,5 +128,91 @@ class AdminStockController extends Controller
                 'item' => app(StockService::class)->presentInventory($updated, $request->user()),
             ],
         ]);
+    }
+
+    public function receipts(Request $request): JsonResponse
+    {
+        $viewer = $request->user();
+        $stock = app(StockService::class);
+        $monthStart = now()->startOfMonth();
+
+        $receipts = StockReceipt::query()
+            ->with(['items.variant.product', 'user'])
+            ->orderByDesc('received_at')
+            ->orderByDesc('id')
+            ->limit(50)
+            ->get();
+
+        $monthReceipts = StockReceipt::query()->where('received_at', '>=', $monthStart);
+        $summary = [
+            'receipts_count' => (clone $monthReceipts)->count(),
+            'units_received' => (int) StockReceiptItem::query()
+                ->whereHas('receipt', fn ($query) => $query->where('received_at', '>=', $monthStart))
+                ->sum('quantity'),
+        ];
+
+        if ($viewer->hasPermissionTo(Permissions::FINANCE_VIEW)) {
+            $summary['merchandise_cost'] = (int) (clone $monthReceipts)->sum('merchandise_cost');
+            $summary['shipping_cost'] = (int) (clone $monthReceipts)->sum('shipping_cost');
+            $summary['invested'] = $summary['merchandise_cost'] + $summary['shipping_cost'];
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Réceptions récupérées avec succès',
+            'data' => [
+                'items' => $receipts->map(fn (StockReceipt $receipt) => $stock->presentReceipt($receipt, $viewer))->values(),
+                'summary' => $summary,
+                'can_adjust' => $viewer->hasPermissionTo(Permissions::STOCK_ADJUST),
+                'can_view_finance' => $viewer->hasPermissionTo(Permissions::FINANCE_VIEW),
+            ],
+        ]);
+    }
+
+    public function storeReceipt(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'items' => 'required|array|min:1',
+            'items.*.variant_id' => 'required|integer|exists:product_variants,id',
+            'items.*.quantity' => 'required|integer|min:1',
+            'items.*.unit_cost' => 'nullable|integer|min:0',
+            'merchandise_cost' => 'nullable|integer|min:0',
+            'shipping_cost' => 'nullable|integer|min:0',
+            'note' => 'nullable|string|max:255',
+            'received_at' => 'nullable|date',
+        ], [
+            'items.required' => 'Ajoutez au moins un produit reçu',
+            'items.min' => 'Ajoutez au moins un produit reçu',
+            'items.*.quantity.min' => 'La quantité reçue doit être au moins 1',
+            'items.*.variant_id.exists' => 'Une variante est introuvable',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur de validation',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        try {
+            $receipt = app(StockService::class)->receiveReceipt(
+                $validator->validated(),
+                $request->user(),
+            );
+        } catch (InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Arrivage enregistré, le stock a été mis à jour',
+            'data' => [
+                'receipt' => app(StockService::class)->presentReceipt($receipt, $request->user()),
+            ],
+        ], 201);
     }
 }
