@@ -3,6 +3,8 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Authorization\Roles;
+use App\Models\Concerns\HasStaffRoles;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -12,7 +14,7 @@ use Laravel\Sanctum\HasApiTokens;
 class User extends Authenticatable
 {
     /** @use HasFactory<\Database\Factories\UserFactory> */
-    use HasFactory, Notifiable, HasApiTokens;
+    use HasApiTokens, HasFactory, HasStaffRoles, Notifiable;
 
     /**
      * The attributes that are mass assignable.
@@ -26,7 +28,7 @@ class User extends Authenticatable
         'whatsapp_phone',
         'phone',
         'role',
-        'is_active'
+        'is_active',
     ];
 
     /**
@@ -69,20 +71,33 @@ class User extends Authenticatable
         return $this->hasMany(CashSession::class, 'cashier_id');
     }
 
+    protected static function booted(): void
+    {
+        static::created(function (User $user) {
+            $user->syncPrimaryRole();
+        });
+
+        static::updated(function (User $user) {
+            if ($user->wasChanged('role')) {
+                $user->syncPrimaryRole();
+            }
+        });
+    }
+
     // Scopes
     public function scopeClients($query)
     {
-        return $query->where('role', 'client');
+        return $query->where('role', Roles::CLIENT);
     }
 
     public function scopeAdmins($query)
     {
-        return $query->where('role', 'admin');
+        return $query->where('role', Roles::ADMIN);
     }
 
     public function scopeCashiers($query)
     {
-        return $query->where('role', 'caissiere');
+        return $query->where('role', Roles::CAISSIERE);
     }
 
     public function scopeActive($query)
@@ -98,22 +113,22 @@ class User extends Authenticatable
     // Méthodes utilitaires
     public function isAdmin(): bool
     {
-        return $this->role === 'admin';
+        return $this->hasRole(Roles::ADMIN);
     }
 
     public function isClient(): bool
     {
-        return $this->role === 'client';
+        return $this->hasRole(Roles::CLIENT);
     }
 
     public function isCashier(): bool
     {
-        return $this->role === 'caissiere';
+        return $this->hasRole(Roles::CAISSIERE);
     }
 
     public function canAccessPos(): bool
     {
-        return $this->isAdmin() || $this->isCashier();
+        return $this->hasAnyRole(Roles::pos());
     }
 
     public function isActive(): bool
@@ -123,7 +138,7 @@ class User extends Authenticatable
 
     public function isBlocked(): bool
     {
-        return !$this->is_active;
+        return ! $this->is_active;
     }
 
     // Accessor pour la propriété is_admin
@@ -160,7 +175,7 @@ class User extends Authenticatable
             'whatsapp_phone' => $whatsappPhone,
             'email' => $email,
             'role' => 'client',
-            'password' => bcrypt(Str::random(16)) // Mot de passe temporaire
+            'password' => bcrypt(Str::random(16)), // Mot de passe temporaire
         ]);
     }
 }

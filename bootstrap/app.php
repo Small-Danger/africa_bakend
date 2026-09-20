@@ -17,21 +17,23 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin' => \App\Http\Middleware\AdminMiddleware::class,
             'large.upload' => \App\Http\Middleware\LargeFileUpload::class,
             'pos' => \App\Http\Middleware\PosMiddleware::class,
+            'permission' => \App\Http\Middleware\PermissionMiddleware::class,
+            'role' => \App\Http\Middleware\RoleMiddleware::class,
         ]);
-        
+
         // Désactiver CSRF pour toutes les routes API (solution simple)
         $middleware->validateCsrfTokens(except: [
             'api/*',
-            'sanctum/*'
+            'sanctum/*',
         ]);
-        
+
         // Ajouter la session aux routes API pour l'authentification admin
         $middleware->api(prepend: [
             \Illuminate\Cookie\Middleware\EncryptCookies::class,
             \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
             \Illuminate\Session\Middleware\StartSession::class,
         ]);
-        
+
         $middleware->web(prepend: [
             \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
         ]);

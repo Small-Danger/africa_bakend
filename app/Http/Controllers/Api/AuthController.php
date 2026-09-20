@@ -5,14 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Support\WhatsAppPhoneValidator;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Auth;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
-use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
@@ -23,13 +21,19 @@ class AuthController extends Controller
      */
     private function userPayload(User $user): array
     {
+        $user->loadMissing(['roles.permissions', 'extraPermissions']);
+
         return [
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
             'whatsapp_phone' => $user->whatsapp_phone,
             'role' => $user->role,
+            'roles' => $user->roleNames(),
+            'permissions' => $user->permissionNames(),
             'is_admin' => $user->isAdmin(),
+            'can_access_backoffice' => $user->canAccessBackoffice(),
+            'can_access_pos' => $user->canAccessPos(),
             'created_at' => optional($user->created_at)->toIso8601String(),
             'updated_at' => optional($user->updated_at)->toIso8601String(),
         ];
@@ -37,8 +41,8 @@ class AuthController extends Controller
 
     /**
      * Inscription d'un nouveau client
-     * 
-     * @param Request $request - Données d'inscription (nom, email/téléphone, mot de passe)
+     *
+     * @param  Request  $request  - Données d'inscription (nom, email/téléphone, mot de passe)
      * @return JsonResponse - Token de connexion et informations utilisateur
      */
     public function register(Request $request): JsonResponse
@@ -92,7 +96,7 @@ class AuthController extends Controller
                 'email' => $request->email,
                 'whatsapp_phone' => $normalizedPhone,
                 'password' => Hash::make($request->password),
-                'role' => 'client' // Par défaut, tous les nouveaux utilisateurs sont des clients
+                'role' => 'client', // Par défaut, tous les nouveaux utilisateurs sont des clients
             ]);
 
             // Créer le token Sanctum pour la connexion automatique
@@ -101,12 +105,12 @@ class AuthController extends Controller
             // Retourner la réponse de succès
             return response()->json([
                 'success' => true,
-                'message' => 'Inscription réussie ! Bienvenue ' . $user->name,
+                'message' => 'Inscription réussie ! Bienvenue '.$user->name,
                 'data' => [
                     'user' => $this->userPayload($user),
                     'token' => $token,
-                    'token_type' => 'Bearer'
-                ]
+                    'token_type' => 'Bearer',
+                ],
             ], 201);
 
         } catch (\Exception $e) {
@@ -121,8 +125,8 @@ class AuthController extends Controller
 
     /**
      * Connexion d'un utilisateur (client ou admin)
-     * 
-     * @param Request $request - Données de connexion (email/téléphone, mot de passe)
+     *
+     * @param  Request  $request  - Données de connexion (email/téléphone, mot de passe)
      * @return JsonResponse - Token de connexion et informations utilisateur
      */
     public function login(Request $request): JsonResponse
@@ -138,31 +142,32 @@ class AuthController extends Controller
             'email' => $request->email,
             'whatsapp_phone' => $request->whatsapp_phone,
             'password' => $request->password ? '***' : 'null',
-            'headers' => $request->headers->all()
+            'headers' => $request->headers->all(),
         ]);
 
         // Validation des données de connexion
         $validator = Validator::make($request->all(), [
             'email' => 'nullable|email', // Email optionnel
             'whatsapp_phone' => 'nullable|string', // Téléphone optionnel
-            'password' => 'required|string'
+            'password' => 'required|string',
         ], [
-            'password.required' => 'Le mot de passe est obligatoire'
+            'password.required' => 'Le mot de passe est obligatoire',
         ]);
 
         // Au moins un identifiant doit être fourni (email OU téléphone)
-        if (!$request->email && !$request->whatsapp_phone) {
+        if (! $request->email && ! $request->whatsapp_phone) {
             \Log::warning('Login failed: No email or whatsapp_phone provided', [
-                'request_data' => $request->all()
+                'request_data' => $request->all(),
             ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Email ou numéro WhatsApp requis',
                 'debug' => [
                     'received_data' => $request->all(),
                     'email_present' => $request->has('email'),
-                    'whatsapp_present' => $request->has('whatsapp_phone')
-                ]
+                    'whatsapp_present' => $request->has('whatsapp_phone'),
+                ],
             ], 422);
         }
 
@@ -171,14 +176,14 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erreur de validation',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         try {
             // Construire la requête de recherche
             $query = User::query();
-            
+
             if ($request->email) {
                 $query->where('email', $request->email);
             } elseif ($request->whatsapp_phone) {
@@ -189,18 +194,18 @@ class AuthController extends Controller
             $user = $query->first();
 
             // Vérifier si l'utilisateur existe et le mot de passe est correct
-            if (!$user || !Hash::check($request->password, $user->password)) {
+            if (! $user || ! Hash::check($request->password, $user->password)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Identifiants incorrects'
+                    'message' => 'Identifiants incorrects',
                 ], 401);
             }
 
             // Vérifier si l'utilisateur est actif
-            if (!$user->is_active ?? true) {
+            if (! $user->is_active ?? true) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Compte désactivé'
+                    'message' => 'Compte désactivé',
                 ], 403);
             }
 
@@ -218,13 +223,13 @@ class AuthController extends Controller
             // Retourner la réponse de succès
             return response()->json([
                 'success' => true,
-                'message' => 'Connexion réussie ! Bonjour ' . $user->name,
+                'message' => 'Connexion réussie ! Bonjour '.$user->name,
                 'data' => [
                     'user' => $this->userPayload($user),
                     'token' => $token,
                     'token_type' => 'Bearer',
-                    'abilities' => $abilities
-                ]
+                    'abilities' => $abilities,
+                ],
             ], 200);
 
         } catch (\Exception $e) {
@@ -232,15 +237,15 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erreur lors de la connexion',
-                'error' => 'Une erreur est survenue, veuillez réessayer'
+                'error' => 'Une erreur est survenue, veuillez réessayer',
             ], 500);
         }
     }
 
     /**
      * Déconnexion de l'utilisateur connecté
-     * 
-     * @param Request $request - Requête avec le token d'authentification
+     *
+     * @param  Request  $request  - Requête avec le token d'authentification
      * @return JsonResponse - Message de déconnexion
      */
     public function logout(Request $request): JsonResponse
@@ -248,19 +253,19 @@ class AuthController extends Controller
         try {
             // Récupérer l'utilisateur connecté
             $user = $request->user();
-            
+
             if ($user) {
                 // Supprimer le token actuel
                 $request->user()->currentAccessToken()->delete();
-                
+
                 return response()->json([
                     'success' => true,
-                    'message' => 'Déconnexion réussie'
+                    'message' => 'Déconnexion réussie',
                 ], 200);
             } else {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Aucun utilisateur connecté'
+                    'message' => 'Aucun utilisateur connecté',
                 ], 401);
             }
 
@@ -268,15 +273,15 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erreur lors de la déconnexion',
-                'error' => 'Une erreur est survenue'
+                'error' => 'Une erreur est survenue',
             ], 500);
         }
     }
 
     /**
      * Récupérer les informations du profil de l'utilisateur connecté
-     * 
-     * @param Request $request - Requête avec le token d'authentification
+     *
+     * @param  Request  $request  - Requête avec le token d'authentification
      * @return JsonResponse - Informations du profil utilisateur
      */
     public function profile(Request $request): JsonResponse
@@ -284,11 +289,11 @@ class AuthController extends Controller
         try {
             // Récupérer l'utilisateur connecté
             $user = $request->user();
-            
-            if (!$user) {
+
+            if (! $user) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Utilisateur non connecté'
+                    'message' => 'Utilisateur non connecté',
                 ], 401);
             }
 
@@ -297,23 +302,23 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Profil récupéré avec succès',
                 'data' => [
-                    'user' => $this->userPayload($user)
-                ]
+                    'user' => $this->userPayload($user),
+                ],
             ], 200);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Erreur lors de la récupération du profil',
-                'error' => 'Une erreur est survenue'
+                'error' => 'Une erreur est survenue',
             ], 500);
         }
     }
 
     /**
      * Mettre à jour le profil de l'utilisateur connecté
-     * 
-     * @param Request $request - Requête avec les nouvelles données
+     *
+     * @param  Request  $request  - Requête avec les nouvelles données
      * @return JsonResponse - Profil mis à jour
      */
     public function updateProfile(Request $request): JsonResponse
@@ -321,11 +326,11 @@ class AuthController extends Controller
         try {
             // Récupérer l'utilisateur connecté
             $user = $request->user();
-            
-            if (!$user) {
+
+            if (! $user) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Utilisateur non connecté'
+                    'message' => 'Utilisateur non connecté',
                 ], 401);
             }
 
@@ -344,12 +349,12 @@ class AuthController extends Controller
             // Validation des données de mise à jour
             $validator = Validator::make($request->all(), [
                 'name' => 'sometimes|string|min:2|max:255',
-                'email' => 'sometimes|nullable|email|unique:users,email,' . $user->id,
+                'email' => 'sometimes|nullable|email|unique:users,email,'.$user->id,
                 'whatsapp_phone' => [
                     'sometimes',
                     'required',
                     'string',
-                    'unique:users,whatsapp_phone,' . $user->id,
+                    'unique:users,whatsapp_phone,'.$user->id,
                     function ($attribute, $value, $fail) {
                         if (! WhatsAppPhoneValidator::isValid($value)) {
                             $fail('Numéro WhatsApp invalide. Vérifiez l\'indicatif et le format mobile.');
@@ -411,23 +416,23 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Profil mis à jour avec succès',
                 'data' => [
-                    'user' => $this->userPayload($user)
-                ]
+                    'user' => $this->userPayload($user),
+                ],
             ], 200);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Erreur lors de la mise à jour du profil',
-                'error' => 'Une erreur est survenue'
+                'error' => 'Une erreur est survenue',
             ], 500);
         }
     }
 
     /**
      * Réinitialisation du mot de passe (optionnel)
-     * 
-     * @param Request $request - Requête avec l'email/téléphone
+     *
+     * @param  Request  $request  - Requête avec l'email/téléphone
      * @return JsonResponse - Message de confirmation
      */
     public function forgotPassword(Request $request): JsonResponse
@@ -435,14 +440,14 @@ class AuthController extends Controller
         // Validation de la requête
         $validator = Validator::make($request->all(), [
             'email' => 'nullable|email',
-            'whatsapp_phone' => 'nullable|string'
+            'whatsapp_phone' => 'nullable|string',
         ]);
 
         // Au moins un identifiant doit être fourni
-        if (!$request->email && !$request->whatsapp_phone) {
+        if (! $request->email && ! $request->whatsapp_phone) {
             return response()->json([
                 'success' => false,
-                'message' => 'Email ou numéro WhatsApp requis'
+                'message' => 'Email ou numéro WhatsApp requis',
             ], 422);
         }
 
@@ -451,14 +456,14 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erreur de validation',
-                'errors' => $validator->errors()
+                'errors' => $validator->errors(),
             ], 422);
         }
 
         try {
             // Construire la requête de recherche
             $query = User::query();
-            
+
             if ($request->email) {
                 $query->where('email', $request->email);
             } elseif ($request->whatsapp_phone) {
@@ -471,17 +476,17 @@ class AuthController extends Controller
             if ($user) {
                 // Ici, vous pourriez implémenter l'envoi d'un lien de réinitialisation
                 // ou d'un code par WhatsApp/SMS
-                
+
                 return response()->json([
                     'success' => true,
                     'message' => 'Instructions de réinitialisation envoyées',
-                    'note' => 'Cette fonctionnalité sera implémentée selon vos besoins'
+                    'note' => 'Cette fonctionnalité sera implémentée selon vos besoins',
                 ], 200);
             } else {
                 // Pour des raisons de sécurité, ne pas révéler si l'utilisateur existe
                 return response()->json([
                     'success' => true,
-                    'message' => 'Instructions de réinitialisation envoyées'
+                    'message' => 'Instructions de réinitialisation envoyées',
                 ], 200);
             }
 
@@ -489,25 +494,25 @@ class AuthController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Erreur lors de la réinitialisation',
-                'error' => 'Une erreur est survenue'
+                'error' => 'Une erreur est survenue',
             ], 500);
         }
     }
 
     /**
      * [ADMIN] Lister tous les clients avec pagination
-     * 
-     * @param Request $request - Requête avec pagination et filtres
+     *
+     * @param  Request  $request  - Requête avec pagination et filtres
      * @return JsonResponse - Liste des clients
      */
     public function listClients(Request $request): JsonResponse
     {
         try {
             // Vérifier que l'utilisateur connecté est un admin
-            if (!$request->user() || !$request->user()->isAdmin()) {
+            if (! $request->user() || ! $request->user()->hasPermissionTo(\App\Authorization\Permissions::CUSTOMERS_VIEW)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Accès non autorisé'
+                    'message' => 'Accès non autorisé',
                 ], 403);
             }
 
@@ -521,10 +526,10 @@ class AuthController extends Controller
 
             // Appliquer les filtres
             if ($search) {
-                $query->where(function($q) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('name', 'like', "%{$search}%")
-                      ->orWhere('email', 'like', "%{$search}%")
-                      ->orWhere('whatsapp_phone', 'like', "%{$search}%");
+                        ->orWhere('email', 'like', "%{$search}%")
+                        ->orWhere('whatsapp_phone', 'like', "%{$search}%");
                 });
             }
 
@@ -536,10 +541,10 @@ class AuthController extends Controller
 
             // Récupérer les clients avec pagination
             $clients = $query->orderBy('created_at', 'desc')
-                            ->paginate($perPage);
+                ->paginate($perPage);
 
             // Formater la réponse
-            $clients->getCollection()->transform(function($client) {
+            $clients->getCollection()->transform(function ($client) {
                 return [
                     'id' => $client->id,
                     'name' => $client->name,
@@ -549,7 +554,7 @@ class AuthController extends Controller
                     'status' => $client->is_active ? 'Actif' : 'Bloqué',
                     'created_at' => $client->created_at->format('d/m/Y H:i'),
                     'orders_count' => $client->orders()->count(),
-                    'last_order' => $client->orders()->latest()->first()?->created_at?->format('d/m/Y H:i') ?? 'Aucune commande'
+                    'last_order' => $client->orders()->latest()->first()?->created_at?->format('d/m/Y H:i') ?? 'Aucune commande',
                 ];
             });
 
@@ -562,63 +567,63 @@ class AuthController extends Controller
                         'current_page' => $clients->currentPage(),
                         'last_page' => $clients->lastPage(),
                         'per_page' => $clients->perPage(),
-                        'total' => $clients->total()
-                    ]
-                ]
+                        'total' => $clients->total(),
+                    ],
+                ],
             ], 200);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Erreur lors de la récupération des clients',
-                'error' => 'Une erreur est survenue'
+                'error' => 'Une erreur est survenue',
             ], 500);
         }
     }
 
     /**
      * [ADMIN] Bloquer/Débloquer un compte client
-     * 
-     * @param Request $request - Requête avec l'ID du client et l'action
+     *
+     * @param  Request  $request  - Requête avec l'ID du client et l'action
      * @return JsonResponse - Confirmation de l'action
      */
     public function toggleClientStatus(Request $request): JsonResponse
     {
         try {
             // Vérifier que l'utilisateur connecté est un admin
-            if (!$request->user() || !$request->user()->isAdmin()) {
+            if (! $request->user() || ! $request->user()->hasPermissionTo(\App\Authorization\Permissions::CUSTOMERS_VIEW)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Accès non autorisé'
+                    'message' => 'Accès non autorisé',
                 ], 403);
             }
 
             // Validation des données
             $validator = Validator::make($request->all(), [
                 'client_id' => 'required|exists:users,id',
-                'action' => 'required|in:block,unblock'
+                'action' => 'required|in:block,unblock',
             ], [
                 'client_id.required' => 'ID du client requis',
                 'client_id.exists' => 'Client introuvable',
                 'action.required' => 'Action requise',
-                'action.in' => 'Action invalide (block ou unblock)'
+                'action.in' => 'Action invalide (block ou unblock)',
             ]);
 
             if ($validator->fails()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Erreur de validation',
-                    'errors' => $validator->errors()
+                    'errors' => $validator->errors(),
                 ], 422);
             }
 
             // Récupérer le client
             $client = User::clients()->find($request->client_id);
-            
-            if (!$client) {
+
+            if (! $client) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Client introuvable'
+                    'message' => 'Client introuvable',
                 ], 404);
             }
 
@@ -626,7 +631,7 @@ class AuthController extends Controller
             if ($client->isAdmin()) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Impossible de modifier le statut d\'un administrateur'
+                    'message' => 'Impossible de modifier le statut d\'un administrateur',
                 ], 403);
             }
 
@@ -641,7 +646,7 @@ class AuthController extends Controller
             }
 
             $actionText = $request->action === 'block' ? 'bloqué' : 'débloqué';
-            
+
             return response()->json([
                 'success' => true,
                 'message' => "Compte client {$actionText} avec succès",
@@ -650,33 +655,33 @@ class AuthController extends Controller
                     'client_name' => $client->name,
                     'is_active' => $client->is_active,
                     'status' => $client->is_active ? 'Actif' : 'Bloqué',
-                    'action' => $request->action
-                ]
+                    'action' => $request->action,
+                ],
             ], 200);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Erreur lors de la modification du statut',
-                'error' => 'Une erreur est survenue'
+                'error' => 'Une erreur est survenue',
             ], 500);
         }
     }
 
     /**
      * [ADMIN] Obtenir les statistiques des clients
-     * 
-     * @param Request $request - Requête authentifiée
+     *
+     * @param  Request  $request  - Requête authentifiée
      * @return JsonResponse - Statistiques des clients
      */
     public function getClientStats(Request $request): JsonResponse
     {
         try {
             // Vérifier que l'utilisateur connecté est un admin
-            if (!$request->user() || !$request->user()->isAdmin()) {
+            if (! $request->user() || ! $request->user()->hasPermissionTo(\App\Authorization\Permissions::CUSTOMERS_VIEW)) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Accès non autorisé'
+                    'message' => 'Accès non autorisé',
                 ], 403);
             }
 
@@ -697,15 +702,15 @@ class AuthController extends Controller
                     'active_clients' => $activeClients,
                     'blocked_clients' => $blockedClients,
                     'new_clients_this_month' => $newClientsThisMonth,
-                    'active_percentage' => $totalClients > 0 ? round(($activeClients / $totalClients) * 100, 2) : 0
-                ]
+                    'active_percentage' => $totalClients > 0 ? round(($activeClients / $totalClients) * 100, 2) : 0,
+                ],
             ], 200);
 
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Erreur lors de la récupération des statistiques',
-                'error' => 'Une erreur est survenue'
+                'error' => 'Une erreur est survenue',
             ], 500);
         }
     }
@@ -730,7 +735,7 @@ class AuthController extends Controller
         }
 
         $clientId = config('services.google.client_id');
-        if (!$clientId) {
+        if (! $clientId) {
             return response()->json([
                 'success' => false,
                 'message' => 'Connexion Google non configurée sur le serveur',
@@ -742,7 +747,7 @@ class AuthController extends Controller
                 'id_token' => $request->credential,
             ]);
 
-            if (!$tokenResponse->ok()) {
+            if (! $tokenResponse->ok()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Token Google invalide ou expiré',
@@ -766,7 +771,7 @@ class AuthController extends Controller
             }
 
             $email = $payload['email'] ?? null;
-            if (!$email) {
+            if (! $email) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Email Google introuvable',
@@ -776,7 +781,7 @@ class AuthController extends Controller
             $name = $payload['name'] ?? explode('@', $email)[0];
             $user = User::where('email', $email)->first();
 
-            if (!$user) {
+            if (! $user) {
                 $user = User::create([
                     'name' => $name,
                     'email' => $email,
@@ -786,7 +791,7 @@ class AuthController extends Controller
                 ]);
             }
 
-            if (!$user->is_active) {
+            if (! $user->is_active) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Votre compte est désactivé. Contactez le support.',

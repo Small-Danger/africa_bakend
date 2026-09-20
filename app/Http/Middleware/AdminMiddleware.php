@@ -16,26 +16,26 @@ class AdminMiddleware
     public function handle(Request $request, Closure $next): Response
     {
         // Vérifier si l'utilisateur est connecté
-        if (!$request->user()) {
+        if (! $request->user()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Authentification requise'
+                'message' => 'Authentification requise',
             ], 401);
         }
 
-        // Vérifier si l'utilisateur est un administrateur
-        if (!$request->user()->isAdmin()) {
+        // Vérifier si l'utilisateur peut accéder au back-office
+        if (! $request->user()->canAccessBackoffice()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Accès non autorisé. Droits d\'administrateur requis.'
+                'message' => 'Accès non autorisé.',
             ], 403);
         }
 
         // Vérifier si le compte administrateur est actif
-        if (!$request->user()->isActive()) {
+        if (! $request->user()->isActive()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Compte administrateur désactivé'
+                'message' => 'Compte administrateur désactivé',
             ], 403);
         }
 

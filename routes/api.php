@@ -1,25 +1,25 @@
 <?php
 
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Api\AuthController;
-use App\Http\Controllers\Api\CategoryController;
-use App\Http\Controllers\Api\ProductController;
-use App\Http\Controllers\Api\VariantController;
-use App\Http\Controllers\Api\ImageController;
-use App\Http\Controllers\Api\CartController;
-use App\Http\Controllers\Api\OrderController;
-use App\Http\Controllers\Api\NotificationController;
-use App\Http\Controllers\Api\SuggestionController;
-use App\Http\Controllers\Api\CustomerController;
-use App\Http\Controllers\Api\BannerController;
 use App\Http\Controllers\Api\AdminCashierController;
+use App\Http\Controllers\Api\AdminTeamController;
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BannerController;
+use App\Http\Controllers\Api\CartController;
+use App\Http\Controllers\Api\CategoryController;
+use App\Http\Controllers\Api\CustomerController;
+use App\Http\Controllers\Api\ImageController;
+use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\Pos\PosCashMovementController;
 use App\Http\Controllers\Api\Pos\PosCashSessionController;
 use App\Http\Controllers\Api\Pos\PosClientController;
 use App\Http\Controllers\Api\Pos\PosOrderController;
 use App\Http\Controllers\Api\Pos\PosPinController;
 use App\Http\Controllers\Api\Pos\PosProductController;
+use App\Http\Controllers\Api\ProductController;
+use App\Http\Controllers\Api\SuggestionController;
+use App\Http\Controllers\Api\VariantController;
+use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
@@ -87,7 +87,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/orders', [OrderController::class, 'store']);
     Route::get('/orders', [OrderController::class, 'index']);
     Route::get('/orders/{id}', [OrderController::class, 'show']);
-    
+
     // Notifications utilisateur
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::put('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
@@ -100,62 +100,56 @@ Route::middleware('auth:sanctum')->group(function () {
 // ========================================
 
 Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function () {
-    
-    // Gestion des catégories
-    Route::post('/categories', [CategoryController::class, 'store']);
-    Route::put('/categories/{id}', [CategoryController::class, 'update']);
-    Route::delete('/categories/{id}', [CategoryController::class, 'destroy']);
-    
-    // Récupérer toutes les catégories (Admin - y compris inactives)
-    Route::get('/categories', [CategoryController::class, 'indexAdmin']);
-    
-    // Upload d'images pour les catégories
-    Route::post('/categories/{id}/image', [CategoryController::class, 'uploadImage']);
-    
-    // Gestion des produits
-    Route::get('/products', [ProductController::class, 'adminIndex']); // Liste des produits pour l'admin
-    Route::post('/products', [ProductController::class, 'store']);
-    Route::post('/products/batch', [ProductController::class, 'storeBatch']); // Création en masse
-    Route::put('/products/{id}', [ProductController::class, 'update']);
-    Route::delete('/products/{id}', [ProductController::class, 'destroy']);
-    
-    // Gestion des variantes de produits
-    Route::prefix('products/{productId}/variants')->group(function () {
-        Route::get('/', [VariantController::class, 'adminIndex']); // Route admin pour toutes les variantes
-        Route::post('/', [VariantController::class, 'store']);
-        Route::post('/batch', [VariantController::class, 'storeBatch']); // Création en batch
-        Route::put('/{variantId}', [VariantController::class, 'update']);
-        Route::delete('/{variantId}', [VariantController::class, 'destroy']);
+
+    Route::middleware('permission:products.manage')->group(function () {
+        Route::post('/categories', [CategoryController::class, 'store']);
+        Route::put('/categories/{id}', [CategoryController::class, 'update']);
+        Route::delete('/categories/{id}', [CategoryController::class, 'destroy']);
+        Route::get('/categories', [CategoryController::class, 'indexAdmin']);
+        Route::post('/categories/{id}/image', [CategoryController::class, 'uploadImage']);
+
+        Route::get('/products', [ProductController::class, 'adminIndex']);
+        Route::post('/products', [ProductController::class, 'store']);
+        Route::post('/products/batch', [ProductController::class, 'storeBatch']);
+        Route::put('/products/{id}', [ProductController::class, 'update']);
+        Route::delete('/products/{id}', [ProductController::class, 'destroy']);
+
+        Route::prefix('products/{productId}/variants')->group(function () {
+            Route::get('/', [VariantController::class, 'adminIndex']);
+            Route::post('/', [VariantController::class, 'store']);
+            Route::post('/batch', [VariantController::class, 'storeBatch']);
+            Route::put('/{variantId}', [VariantController::class, 'update']);
+            Route::delete('/{variantId}', [VariantController::class, 'destroy']);
+        });
+
+        Route::prefix('products/{productId}/images')->group(function () {
+            Route::get('/', [ImageController::class, 'index']);
+            Route::post('/', [ImageController::class, 'store']);
+            Route::put('/{imageId}', [ImageController::class, 'update']);
+            Route::delete('/{imageId}', [ImageController::class, 'destroy']);
+            Route::post('/reorder', [ImageController::class, 'updateOrder']);
+        });
     });
-    
-    // Gestion des images de produits
-    Route::prefix('products/{productId}/images')->group(function () {
-        Route::get('/', [ImageController::class, 'index']);
-        Route::post('/', [ImageController::class, 'store']);
-        Route::put('/{imageId}', [ImageController::class, 'update']);
-        Route::delete('/{imageId}', [ImageController::class, 'destroy']);
-        Route::post('/reorder', [ImageController::class, 'updateOrder']);
+
+    Route::middleware('permission:orders.view')->group(function () {
+        Route::get('/orders', [OrderController::class, 'adminIndex']);
+        Route::get('/orders/{id}', [OrderController::class, 'adminShow']);
+        Route::put('/orders/{id}/status', [OrderController::class, 'updateStatus']);
     });
-    
-    // Gestion des commandes
-    Route::get('/orders', [OrderController::class, 'adminIndex']);
-    Route::get('/orders/{id}', [OrderController::class, 'adminShow']);
-    Route::put('/orders/{id}/status', [OrderController::class, 'updateStatus']);
-    
-    // Gestion des notifications
-    Route::post('/notifications', [NotificationController::class, 'store']);
-    Route::post('/notifications/multiple', [NotificationController::class, 'sendMultiple']);
-    Route::post('/notifications/promotion', [NotificationController::class, 'sendPromotion']);
-    
-    // Gestion des clients (anciennes routes - à supprimer progressivement)
-    Route::prefix('clients')->group(function () {
+
+    Route::middleware('role:admin')->group(function () {
+        Route::post('/notifications', [NotificationController::class, 'store']);
+        Route::post('/notifications/multiple', [NotificationController::class, 'sendMultiple']);
+        Route::post('/notifications/promotion', [NotificationController::class, 'sendPromotion']);
+    });
+
+    Route::middleware('permission:customers.view')->prefix('clients')->group(function () {
         Route::get('/', [AuthController::class, 'listClients']);
         Route::post('/toggle-status', [AuthController::class, 'toggleClientStatus']);
         Route::get('/stats', [AuthController::class, 'getClientStats']);
     });
-    
-    // Gestion des clients (nouvelles routes avec CustomerController)
-    Route::prefix('customers')->group(function () {
+
+    Route::middleware('permission:customers.view')->prefix('customers')->group(function () {
         Route::get('/', [CustomerController::class, 'index']);
         Route::get('/stats', [CustomerController::class, 'stats']);
         Route::get('/{id}', [CustomerController::class, 'show']);
@@ -163,24 +157,31 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
         Route::post('/bulk-action', [CustomerController::class, 'bulkAction']);
     });
 
-    // Personnel caisse (caissières)
-    Route::prefix('cashiers')->group(function () {
+    Route::middleware('permission:team.manage,team.manage_staff')->prefix('cashiers')->group(function () {
         Route::get('/', [AdminCashierController::class, 'index']);
         Route::post('/', [AdminCashierController::class, 'store']);
         Route::put('/{id}', [AdminCashierController::class, 'update']);
         Route::post('/{id}/toggle-status', [AdminCashierController::class, 'toggleStatus']);
     });
-    
-                // Gestion des bannières
-            Route::prefix('banners')->middleware('large.upload')->group(function () {
-                Route::get('/', [BannerController::class, 'adminIndex']);
-                Route::post('/', [BannerController::class, 'store']);
-                Route::get('/{id}', [BannerController::class, 'show']);
-                Route::put('/{id}', [BannerController::class, 'update']);
-                Route::delete('/{id}', [BannerController::class, 'destroy']);
-                Route::post('/{id}/toggle-status', [BannerController::class, 'toggleStatus']);
-            });
+
+    Route::prefix('banners')->middleware(['permission:banners.manage', 'large.upload'])->group(function () {
+        Route::get('/', [BannerController::class, 'adminIndex']);
+        Route::post('/', [BannerController::class, 'store']);
+        Route::get('/{id}', [BannerController::class, 'show']);
+        Route::put('/{id}', [BannerController::class, 'update']);
+        Route::delete('/{id}', [BannerController::class, 'destroy']);
+        Route::post('/{id}/toggle-status', [BannerController::class, 'toggleStatus']);
+    });
 });
+
+Route::middleware(['auth:sanctum', 'permission:team.manage,team.manage_staff'])
+    ->prefix('admin/team')
+    ->group(function () {
+        Route::get('/', [AdminTeamController::class, 'index']);
+        Route::post('/', [AdminTeamController::class, 'store']);
+        Route::put('/{id}', [AdminTeamController::class, 'update']);
+        Route::post('/{id}/toggle-status', [AdminTeamController::class, 'toggleStatus']);
+    });
 
 // ========================================
 // ROUTES CAISSE (POS) — admin & caissière
@@ -232,10 +233,10 @@ if (app()->environment('local')) {
             'message' => 'API BS Shop fonctionne !',
             'timestamp' => now(),
             'version' => '1.0.0',
-            'status' => 'ready'
+            'status' => 'ready',
         ]);
     });
-    
+
     Route::get('/test/auth', function () {
         return response()->json([
             'message' => 'Système d\'authentification opérationnel',
@@ -243,8 +244,8 @@ if (app()->environment('local')) {
                 'register' => 'Inscription client',
                 'login' => 'Connexion client/admin',
                 'admin_management' => 'Gestion des clients par admin',
-                'sanctum' => 'Authentification par tokens'
-            ]
+                'sanctum' => 'Authentification par tokens',
+            ],
         ]);
     });
 }
