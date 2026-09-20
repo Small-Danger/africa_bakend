@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AdminActivityController;
 use App\Http\Controllers\Api\AdminCashierController;
+use App\Http\Controllers\Api\AdminFinanceController;
 use App\Http\Controllers\Api\AdminSettingsController;
 use App\Http\Controllers\Api\AdminStockController;
 use App\Http\Controllers\Api\AdminTeamController;
@@ -177,6 +178,10 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
     Route::middleware('permission:settings.manage')->prefix('settings')->group(function () {
         Route::get('/', [AdminSettingsController::class, 'show']);
         Route::put('/', [AdminSettingsController::class, 'update']);
+    });
+
+    Route::middleware('permission:finance.view')->prefix('finance')->group(function () {
+        Route::get('/month', [AdminFinanceController::class, 'month']);
     });
 
     Route::middleware('permission:activity.view')->prefix('activity')->group(function () {
