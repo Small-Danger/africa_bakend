@@ -23,6 +23,28 @@ class AdminFinanceController extends Controller
             ], 422);
         }
 
+        $current = $this->reportFor($year, $month);
+        $anchor = Carbon::create($year, $month, 1);
+        $series = [];
+        for ($i = 5; $i >= 0; $i--) {
+            $point = $anchor->copy()->subMonths($i);
+            $series[] = $this->reportFor((int) $point->year, (int) $point->month);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Rapport du mois récupéré avec succès',
+            'data' => array_merge($current, [
+                'series' => $series,
+            ]),
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function reportFor(int $year, int $month): array
+    {
         $start = Carbon::create($year, $month, 1)->startOfMonth();
         $end = $start->copy()->endOfMonth();
 
@@ -44,23 +66,20 @@ class AdminFinanceController extends Controller
             ? (int) min(100, round($sales / $invested * 100))
             : ($sales > 0 ? 100 : 0);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Rapport du mois récupéré avec succès',
-            'data' => [
-                'year' => $year,
-                'month' => $month,
-                'label' => $start->locale('fr')->translatedFormat('F Y'),
-                'invested' => $invested,
-                'merchandise_cost' => $merchandise,
-                'shipping_cost' => $shipping,
-                'receipts_count' => (clone $receipts)->count(),
-                'sales' => $sales,
-                'orders_count' => $ordersCount,
-                'remaining' => $remaining,
-                'progress_percent' => $progress,
-                'recovered' => $invested > 0 && $sales >= $invested,
-            ],
-        ]);
+        return [
+            'year' => $year,
+            'month' => $month,
+            'label' => $start->locale('fr')->translatedFormat('F Y'),
+            'short_label' => $start->locale('fr')->translatedFormat('M'),
+            'invested' => $invested,
+            'merchandise_cost' => $merchandise,
+            'shipping_cost' => $shipping,
+            'receipts_count' => (clone $receipts)->count(),
+            'sales' => $sales,
+            'orders_count' => $ordersCount,
+            'remaining' => $remaining,
+            'progress_percent' => $progress,
+            'recovered' => $invested > 0 && $sales >= $invested,
+        ];
     }
 }

@@ -93,7 +93,10 @@ test('un admin voit l’investissement du mois face aux ventes hors annulations'
         ->assertJsonPath('data.sales', 80000)
         ->assertJsonPath('data.orders_count', 1)
         ->assertJsonPath('data.remaining', 195000)
-        ->assertJsonPath('data.recovered', false);
+        ->assertJsonPath('data.recovered', false)
+        ->assertJsonCount(6, 'data.series')
+        ->assertJsonPath('data.series.5.invested', 275000)
+        ->assertJsonPath('data.series.5.sales', 80000);
 });
 
 test('un arrivage annulé sort du rapport finance du mois', function () {
