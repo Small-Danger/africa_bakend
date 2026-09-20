@@ -16,6 +16,26 @@ function staffToken(User $user): string
     return $user->createToken('test')->plainTextToken;
 }
 
+test('un visiteur non authentifié reçoit 401 JSON et non une erreur login', function () {
+    $this->get('/api/admin/team')
+        ->assertUnauthorized()
+        ->assertJson(['message' => 'Unauthenticated.']);
+});
+
+test('un admin peut lister l’équipe', function () {
+    $admin = User::factory()->admin()->create();
+    $gerant = User::factory()->gerant()->create();
+
+    $ids = collect(
+        $this->withToken(staffToken($admin))
+            ->getJson('/api/admin/team')
+            ->assertOk()
+            ->json('data.members')
+    )->pluck('id');
+
+    expect($ids)->toContain($admin->id)->toContain($gerant->id);
+});
+
 test('un admin peut créer un gérant et une secrétaire', function () {
     $admin = User::factory()->admin()->create();
 

@@ -164,6 +164,13 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
         Route::post('/{id}/toggle-status', [AdminCashierController::class, 'toggleStatus']);
     });
 
+    Route::middleware('permission:team.manage,team.manage_staff')->prefix('team')->group(function () {
+        Route::get('/', [AdminTeamController::class, 'index']);
+        Route::post('/', [AdminTeamController::class, 'store']);
+        Route::put('/{id}', [AdminTeamController::class, 'update']);
+        Route::post('/{id}/toggle-status', [AdminTeamController::class, 'toggleStatus']);
+    });
+
     Route::prefix('banners')->middleware(['permission:banners.manage', 'large.upload'])->group(function () {
         Route::get('/', [BannerController::class, 'adminIndex']);
         Route::post('/', [BannerController::class, 'store']);
@@ -173,15 +180,6 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
         Route::post('/{id}/toggle-status', [BannerController::class, 'toggleStatus']);
     });
 });
-
-Route::middleware(['auth:sanctum', 'permission:team.manage,team.manage_staff'])
-    ->prefix('admin/team')
-    ->group(function () {
-        Route::get('/', [AdminTeamController::class, 'index']);
-        Route::post('/', [AdminTeamController::class, 'store']);
-        Route::put('/{id}', [AdminTeamController::class, 'update']);
-        Route::post('/{id}/toggle-status', [AdminTeamController::class, 'toggleStatus']);
-    });
 
 // ========================================
 // ROUTES CAISSE (POS) — admin & caissière
