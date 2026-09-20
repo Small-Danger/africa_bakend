@@ -165,6 +165,56 @@ final class StockService
         ];
     }
 
+    /**
+     * Ligne d'inventaire pour l'écran admin Stock.
+     *
+     * @return array<string, mixed>
+     */
+    public function presentInventory(ProductVariant $variant, User $viewer): array
+    {
+        $snap = $this->snapshot($variant);
+        $showQty = $viewer->hasPermissionTo(Permissions::STOCK_VIEW_QUANTITIES);
+        $isLow = ! $snap['unlimited_legacy']
+            && $snap['state'] === StockState::EN_STOCK
+            && $snap['available'] > 0
+            && $snap['available'] <= $snap['low_stock_threshold'];
+
+        $label = $showQty
+            ? ($snap['needs_inventory'] ? 'À inventorier' : $snap['label'])
+            : match (true) {
+                $snap['needs_inventory'] => 'À inventorier',
+                $isLow => 'Stock faible',
+                $snap['state'] === StockState::SUR_COMMANDE => 'Sur commande',
+                $snap['state'] === StockState::RUPTURE => 'Indisponible',
+                default => 'En stock',
+            };
+
+        $product = $variant->relationLoaded('product') ? $variant->product : $variant->product()->first();
+
+        $payload = [
+            'id' => $variant->id,
+            'product_id' => $product?->id,
+            'product_name' => $product?->name,
+            'variant_name' => $variant->name,
+            'sku' => $variant->sku,
+            'category_name' => $product?->category?->name,
+            'is_active' => (bool) $variant->is_active,
+            'stock_status' => $snap['state'],
+            'stock_label' => $label,
+            'needs_inventory' => $snap['needs_inventory'],
+            'is_low' => $isLow,
+            'preorder_allowed' => $snap['preorder_allowed'],
+        ];
+
+        if ($showQty) {
+            $payload['stock_quantity'] = $snap['unlimited_legacy'] ? null : $snap['available'];
+            $payload['stock_on_hand'] = $snap['unlimited_legacy'] ? null : $snap['on_hand'];
+            $payload['stock_reserved'] = $snap['reserved'];
+        }
+
+        return $payload;
+    }
+
     public function recordOpening(ProductVariant $variant, ?User $actor = null): void
     {
         if ($variant->stock_quantity === null) {

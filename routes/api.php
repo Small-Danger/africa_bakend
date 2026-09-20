@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AdminActivityController;
 use App\Http\Controllers\Api\AdminCashierController;
 use App\Http\Controllers\Api\AdminSettingsController;
+use App\Http\Controllers\Api\AdminStockController;
 use App\Http\Controllers\Api\AdminTeamController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BannerController;
@@ -180,6 +181,12 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
 
     Route::middleware('permission:activity.view')->prefix('activity')->group(function () {
         Route::get('/', [AdminActivityController::class, 'index']);
+    });
+
+    Route::middleware('permission:stock.view_status')->prefix('stock')->group(function () {
+        Route::get('/', [AdminStockController::class, 'index']);
+        Route::put('/{variantId}', [AdminStockController::class, 'update'])
+            ->middleware('permission:stock.adjust');
     });
 
     Route::prefix('banners')->middleware(['permission:banners.manage', 'large.upload'])->group(function () {

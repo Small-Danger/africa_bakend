@@ -18,7 +18,7 @@ return new class extends Migration
             $table->timestamp('email_verified_at')->nullable(); // Date de vérification de l'email
             $table->string('password');                      // Mot de passe hashé
             $table->string('whatsapp_phone')->nullable();    // Numéro WhatsApp pour les commandes
-            $table->enum('role', ['admin', 'client'])->default('client'); // Rôle utilisateur (admin ou client)
+            $table->enum('role', ['admin', 'gerant', 'secretaire', 'caissiere', 'client'])->default('client');
             $table->boolean('is_active')->default(true);     // Si le compte utilisateur est actif/bloqué
             $table->rememberToken();                         // Token "Se souvenir de moi"
             $table->timestamps();                            // Dates de création et modification

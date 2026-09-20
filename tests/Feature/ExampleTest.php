@@ -1,5 +1,9 @@
 <?php
 
+use Tests\RefreshDatabaseSafe;
+
+uses(RefreshDatabaseSafe::class);
+
 test('the application returns a successful response', function () {
     $response = $this->get('/');
 
