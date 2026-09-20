@@ -6,6 +6,7 @@ use App\Authorization\Roles;
 use App\Authorization\StaffAccess;
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\ActivityLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -97,6 +98,17 @@ class AdminTeamController extends Controller
             $member->save();
         }
 
+        ActivityLogger::record(
+            $actor,
+            'team.created',
+            'Compte '.Roles::label($member->role).' créé : '.$member->name,
+            $member,
+            [
+                'email' => $member->email,
+                'role' => $member->role,
+            ],
+        );
+
         return response()->json([
             'success' => true,
             'message' => 'Compte créé avec succès',
@@ -164,7 +176,33 @@ class AdminTeamController extends Controller
             $member->pos_pin = Hash::make($request->pin);
         }
 
+        $changes = [];
+        foreach (['name', 'email', 'role', 'phone'] as $field) {
+            if ($member->isDirty($field)) {
+                $changes[$field] = [
+                    'from' => $member->getOriginal($field),
+                    'to' => $member->{$field},
+                ];
+            }
+        }
+        if ($request->filled('password')) {
+            $changes['password'] = ['from' => '(inchangé)', 'to' => '(modifié)'];
+        }
+        if ($request->filled('pin')) {
+            $changes['pin'] = ['from' => '(inchangé)', 'to' => '(modifié)'];
+        }
+
         $member->save();
+
+        if ($changes !== []) {
+            ActivityLogger::record(
+                $actor,
+                'team.updated',
+                'Compte modifié : '.$member->name,
+                $member,
+                ['changes' => $changes],
+            );
+        }
 
         return response()->json([
             'success' => true,
@@ -195,6 +233,14 @@ class AdminTeamController extends Controller
         if (! $member->is_active) {
             $member->tokens()->delete();
         }
+
+        ActivityLogger::record(
+            $actor,
+            $member->is_active ? 'team.activated' : 'team.deactivated',
+            ($member->is_active ? 'Compte activé' : 'Compte désactivé').' : '.$member->name,
+            $member,
+            ['is_active' => $member->is_active],
+        );
 
         return response()->json([
             'success' => true,

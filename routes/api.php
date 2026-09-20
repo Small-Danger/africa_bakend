@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AdminActivityController;
 use App\Http\Controllers\Api\AdminCashierController;
 use App\Http\Controllers\Api\AdminSettingsController;
 use App\Http\Controllers\Api\AdminTeamController;
@@ -175,6 +176,10 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
     Route::middleware('permission:settings.manage')->prefix('settings')->group(function () {
         Route::get('/', [AdminSettingsController::class, 'show']);
         Route::put('/', [AdminSettingsController::class, 'update']);
+    });
+
+    Route::middleware('permission:activity.view')->prefix('activity')->group(function () {
+        Route::get('/', [AdminActivityController::class, 'index']);
     });
 
     Route::prefix('banners')->middleware(['permission:banners.manage', 'large.upload'])->group(function () {

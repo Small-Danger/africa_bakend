@@ -6,6 +6,7 @@ use App\Authorization\Roles;
 use App\Http\Controllers\Controller;
 use App\Models\ShopSetting;
 use App\Models\User;
+use App\Services\ActivityLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -87,8 +88,30 @@ class AdminSettingsController extends Controller
         }
 
         $settings = ShopSetting::current();
+        $before = $settings->toPayload();
         $settings->fill($validator->validated());
         $settings->save();
+        $after = $settings->fresh()->toPayload();
+
+        $changes = [];
+        foreach ($validator->validated() as $key => $value) {
+            if (($before[$key] ?? null) != ($after[$key] ?? null)) {
+                $changes[$key] = [
+                    'from' => $before[$key] ?? null,
+                    'to' => $after[$key] ?? null,
+                ];
+            }
+        }
+
+        if ($changes !== []) {
+            ActivityLogger::record(
+                $actor,
+                'settings.updated',
+                'Paramètres boutique mis à jour',
+                $settings,
+                ['changes' => $changes],
+            );
+        }
 
         return response()->json([
             'success' => true,
