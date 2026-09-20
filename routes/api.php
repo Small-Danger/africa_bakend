@@ -194,6 +194,10 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
             ->middleware('permission:stock.view_quantities');
         Route::post('/receipts', [AdminStockController::class, 'storeReceipt'])
             ->middleware('permission:stock.adjust');
+        Route::put('/receipts/{receiptId}', [AdminStockController::class, 'updateReceipt'])
+            ->middleware('permission:stock.adjust');
+        Route::delete('/receipts/{receiptId}', [AdminStockController::class, 'cancelReceipt'])
+            ->middleware('permission:stock.adjust');
         Route::put('/{variantId}', [AdminStockController::class, 'update'])
             ->middleware('permission:stock.adjust');
     });

@@ -137,17 +137,17 @@ class AdminStockController extends Controller
         $monthStart = now()->startOfMonth();
 
         $receipts = StockReceipt::query()
-            ->with(['items.variant.product', 'user'])
+            ->with(['items.variant.product', 'user', 'cancelledBy'])
             ->orderByDesc('received_at')
             ->orderByDesc('id')
             ->limit(50)
             ->get();
 
-        $monthReceipts = StockReceipt::query()->where('received_at', '>=', $monthStart);
+        $monthReceipts = StockReceipt::query()->active()->where('received_at', '>=', $monthStart);
         $summary = [
             'receipts_count' => (clone $monthReceipts)->count(),
             'units_received' => (int) StockReceiptItem::query()
-                ->whereHas('receipt', fn ($query) => $query->where('received_at', '>=', $monthStart))
+                ->whereHas('receipt', fn ($query) => $query->active()->where('received_at', '>=', $monthStart))
                 ->sum('quantity'),
         ];
 
@@ -171,21 +171,7 @@ class AdminStockController extends Controller
 
     public function storeReceipt(Request $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'items' => 'required|array|min:1',
-            'items.*.variant_id' => 'required|integer|exists:product_variants,id',
-            'items.*.quantity' => 'required|integer|min:1',
-            'items.*.unit_cost' => 'nullable|integer|min:0',
-            'merchandise_cost' => 'nullable|integer|min:0',
-            'shipping_cost' => 'nullable|integer|min:0',
-            'note' => 'nullable|string|max:255',
-            'received_at' => 'nullable|date',
-        ], [
-            'items.required' => 'Ajoutez au moins un produit reçu',
-            'items.min' => 'Ajoutez au moins un produit reçu',
-            'items.*.quantity.min' => 'La quantité reçue doit être au moins 1',
-            'items.*.variant_id.exists' => 'Une variante est introuvable',
-        ]);
+        $validator = Validator::make($request->all(), $this->receiptRules(), $this->receiptMessages());
 
         if ($validator->fails()) {
             return response()->json([
@@ -214,5 +200,125 @@ class AdminStockController extends Controller
                 'receipt' => app(StockService::class)->presentReceipt($receipt, $request->user()),
             ],
         ], 201);
+    }
+
+    public function updateReceipt(Request $request, int $receiptId): JsonResponse
+    {
+        $receipt = StockReceipt::query()->find($receiptId);
+        if (! $receipt) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Arrivage introuvable',
+            ], 404);
+        }
+
+        $validator = Validator::make($request->all(), $this->receiptRules(), $this->receiptMessages());
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur de validation',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        try {
+            $updated = app(StockService::class)->updateReceipt(
+                $receipt,
+                $validator->validated(),
+                $request->user(),
+            );
+        } catch (InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Arrivage corrigé, le stock a été ajusté',
+            'data' => [
+                'receipt' => app(StockService::class)->presentReceipt($updated, $request->user()),
+            ],
+        ]);
+    }
+
+    public function cancelReceipt(Request $request, int $receiptId): JsonResponse
+    {
+        $receipt = StockReceipt::query()->find($receiptId);
+        if (! $receipt) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Arrivage introuvable',
+            ], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'confirmation' => 'required|string',
+            'reason' => 'nullable|string|max:255',
+        ], [
+            'confirmation.required' => 'Tapez DELETE pour confirmer',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur de validation',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        try {
+            $cancelled = app(StockService::class)->cancelReceipt(
+                $receipt,
+                $request->user(),
+                (string) $validator->validated()['confirmation'],
+                $validator->validated()['reason'] ?? null,
+            );
+        } catch (InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Arrivage annulé : le stock a été retiré, l’historique est conservé',
+            'data' => [
+                'receipt' => app(StockService::class)->presentReceipt($cancelled, $request->user()),
+            ],
+        ]);
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function receiptRules(): array
+    {
+        return [
+            'items' => 'required|array|min:1',
+            'items.*.variant_id' => 'required|integer|exists:product_variants,id',
+            'items.*.quantity' => 'required|integer|min:1',
+            'items.*.unit_cost' => 'nullable|integer|min:0',
+            'merchandise_cost' => 'nullable|integer|min:0',
+            'shipping_cost' => 'nullable|integer|min:0',
+            'note' => 'nullable|string|max:255',
+            'received_at' => 'nullable|date',
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function receiptMessages(): array
+    {
+        return [
+            'items.required' => 'Ajoutez au moins un produit reçu',
+            'items.min' => 'Ajoutez au moins un produit reçu',
+            'items.*.quantity.min' => 'La quantité reçue doit être au moins 1',
+            'items.*.variant_id.exists' => 'Une variante est introuvable',
+        ];
     }
 }

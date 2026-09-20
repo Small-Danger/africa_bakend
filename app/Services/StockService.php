@@ -409,18 +409,7 @@ final class StockService
      */
     public function receiveReceipt(array $payload, User $actor): StockReceipt
     {
-        $lines = [];
-        foreach ($payload['items'] ?? [] as $line) {
-            $variantId = (int) ($line['variant_id'] ?? 0);
-            $quantity = (int) ($line['quantity'] ?? 0);
-            if ($variantId < 1 || $quantity < 1) {
-                continue;
-            }
-            $lines[$variantId]['quantity'] = ($lines[$variantId]['quantity'] ?? 0) + $quantity;
-            if (array_key_exists('unit_cost', $line) && $line['unit_cost'] !== null && $line['unit_cost'] !== '') {
-                $lines[$variantId]['unit_cost'] = (int) $line['unit_cost'];
-            }
-        }
+        $lines = $this->mergeReceiptLines($payload['items'] ?? []);
 
         if ($lines === []) {
             throw new InvalidArgumentException('Ajoutez au moins une variante avec une quantité reçue');
@@ -493,12 +482,172 @@ final class StockService
     }
 
     /**
+     * Corrige un arrivage : le stock suit la différence, la fiche et le journal restent.
+     *
+     * @param  array{
+     *     items: list<array{variant_id:int, quantity:int, unit_cost?:int|null}>,
+     *     note?: string|null,
+     *     merchandise_cost?: int,
+     *     shipping_cost?: int,
+     *     received_at?: \DateTimeInterface|string|null
+     * }  $payload
+     */
+    public function updateReceipt(StockReceipt $receipt, array $payload, User $actor): StockReceipt
+    {
+        $lines = $this->mergeReceiptLines($payload['items'] ?? []);
+        if ($lines === []) {
+            throw new InvalidArgumentException('Ajoutez au moins une variante avec une quantité reçue');
+        }
+
+        return DB::transaction(function () use ($receipt, $payload, $actor, $lines) {
+            $lockedReceipt = StockReceipt::query()->lockForUpdate()->findOrFail($receipt->id);
+            $this->assertReceiptActive($lockedReceipt);
+            $lockedReceipt->load('items');
+
+            $oldLines = [];
+            foreach ($lockedReceipt->items as $item) {
+                $oldLines[(int) $item->product_variant_id] = (int) $item->quantity;
+            }
+
+            $variantIds = array_values(array_unique(array_merge(array_keys($oldLines), array_keys($lines))));
+            $variants = $this->lockVariantsById($variantIds);
+
+            foreach ($variantIds as $variantId) {
+                $delta = (int) ($lines[$variantId]['quantity'] ?? 0) - (int) ($oldLines[$variantId] ?? 0);
+                if ($delta === 0) {
+                    continue;
+                }
+
+                $this->applyQuantityDelta(
+                    $variants[$variantId],
+                    $delta,
+                    $actor,
+                    $lockedReceipt,
+                    'reception_correction',
+                    $delta > 0 ? 'Correction d’arrivage (ajout)' : 'Correction d’arrivage (retrait)',
+                );
+            }
+
+            $existing = $lockedReceipt->items->keyBy(fn (StockReceiptItem $item) => (int) $item->product_variant_id);
+            foreach ($existing as $variantId => $item) {
+                if (! isset($lines[$variantId])) {
+                    $item->delete();
+                    continue;
+                }
+                $item->quantity = $lines[$variantId]['quantity'];
+                if (array_key_exists('unit_cost', $lines[$variantId])) {
+                    $item->unit_cost = $lines[$variantId]['unit_cost'];
+                }
+                $item->save();
+            }
+            foreach ($lines as $variantId => $line) {
+                if ($existing->has($variantId)) {
+                    continue;
+                }
+                StockReceiptItem::query()->create([
+                    'stock_receipt_id' => $lockedReceipt->id,
+                    'product_variant_id' => $variantId,
+                    'quantity' => $line['quantity'],
+                    'unit_cost' => $line['unit_cost'] ?? null,
+                ]);
+            }
+
+            if (array_key_exists('merchandise_cost', $payload)) {
+                $lockedReceipt->merchandise_cost = max(0, (int) $payload['merchandise_cost']);
+            }
+            if (array_key_exists('shipping_cost', $payload)) {
+                $lockedReceipt->shipping_cost = max(0, (int) $payload['shipping_cost']);
+            }
+            if (array_key_exists('note', $payload)) {
+                $lockedReceipt->note = trim((string) $payload['note']) !== '' ? trim((string) $payload['note']) : null;
+            }
+            if (array_key_exists('received_at', $payload) && $payload['received_at']) {
+                $lockedReceipt->received_at = $payload['received_at'];
+            }
+            $lockedReceipt->save();
+
+            $fresh = $lockedReceipt->fresh(['items.variant.product', 'user', 'cancelledBy']);
+            $units = (int) $fresh->items->sum('quantity');
+
+            ActivityLogger::record(
+                $actor,
+                'stock.receipt_updated',
+                'Arrivage modifié : '.$units.' pièce(s) sur '.$fresh->items->count().' variante(s)',
+                $fresh,
+                [
+                    'units' => $units,
+                    'merchandise_cost' => $fresh->merchandise_cost,
+                    'shipping_cost' => $fresh->shipping_cost,
+                ],
+                'admin',
+            );
+
+            return $fresh;
+        });
+    }
+
+    public function cancelReceipt(StockReceipt $receipt, User $actor, string $confirmation, ?string $reason = null): StockReceipt
+    {
+        if ($confirmation !== 'DELETE') {
+            throw new InvalidArgumentException('Tapez DELETE pour confirmer l’annulation');
+        }
+
+        return DB::transaction(function () use ($receipt, $actor, $reason) {
+            $lockedReceipt = StockReceipt::query()->lockForUpdate()->findOrFail($receipt->id);
+            $this->assertReceiptActive($lockedReceipt);
+            $lockedReceipt->load('items');
+
+            if ($lockedReceipt->items->isEmpty()) {
+                throw new InvalidArgumentException('Cet arrivage n’a aucune ligne à annuler');
+            }
+
+            $variantIds = $lockedReceipt->items->pluck('product_variant_id')->map(fn ($id) => (int) $id)->all();
+            $variants = $this->lockVariantsById($variantIds);
+
+            foreach ($lockedReceipt->items as $item) {
+                $this->applyQuantityDelta(
+                    $variants[(int) $item->product_variant_id],
+                    -1 * (int) $item->quantity,
+                    $actor,
+                    $lockedReceipt,
+                    'reception_annulee',
+                    $reason ?: 'Annulation d’arrivage',
+                    ['receipt_item_id' => $item->id],
+                );
+            }
+
+            $lockedReceipt->cancelled_at = now();
+            $lockedReceipt->cancelled_by = $actor->id;
+            $lockedReceipt->cancel_reason = $reason ? (trim($reason) ?: null) : null;
+            $lockedReceipt->save();
+
+            $fresh = $lockedReceipt->fresh(['items.variant.product', 'user', 'cancelledBy']);
+
+            ActivityLogger::record(
+                $actor,
+                'stock.receipt_cancelled',
+                'Arrivage annulé : le stock a été retiré, l’historique est conservé',
+                $fresh,
+                [
+                    'units' => (int) $fresh->items->sum('quantity'),
+                    'merchandise_cost' => $fresh->merchandise_cost,
+                    'shipping_cost' => $fresh->shipping_cost,
+                ],
+                'admin',
+            );
+
+            return $fresh;
+        });
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function presentReceipt(StockReceipt $receipt, User $viewer): array
     {
         $showMoney = $viewer->hasPermissionTo(Permissions::FINANCE_VIEW);
         $units = (int) $receipt->items->sum('quantity');
+        $cancelled = $receipt->isCancelled();
 
         $payload = [
             'id' => $receipt->id,
@@ -507,6 +656,9 @@ final class StockService
             'units' => $units,
             'lines_count' => $receipt->items->count(),
             'actor_name' => $receipt->user?->name,
+            'cancelled' => $cancelled,
+            'cancelled_at' => optional($receipt->cancelled_at)->toIso8601String(),
+            'cancelled_by_name' => $receipt->cancelledBy?->name,
             'items' => $receipt->items->map(function (StockReceiptItem $item) {
                 $variant = $item->variant;
                 $product = $variant?->product;
@@ -524,10 +676,114 @@ final class StockService
         if ($showMoney) {
             $payload['merchandise_cost'] = (int) $receipt->merchandise_cost;
             $payload['shipping_cost'] = (int) $receipt->shipping_cost;
-            $payload['invested'] = $receipt->invested();
+            $payload['invested'] = $cancelled ? 0 : $receipt->invested();
         }
 
         return $payload;
+    }
+
+    /**
+     * @param  list<array{variant_id?:int, quantity?:int, unit_cost?:int|null}>  $items
+     * @return array<int, array{quantity: int, unit_cost?: int}>
+     */
+    private function mergeReceiptLines(array $items): array
+    {
+        $lines = [];
+        foreach ($items as $line) {
+            $variantId = (int) ($line['variant_id'] ?? 0);
+            $quantity = (int) ($line['quantity'] ?? 0);
+            if ($variantId < 1 || $quantity < 1) {
+                continue;
+            }
+            $lines[$variantId]['quantity'] = ($lines[$variantId]['quantity'] ?? 0) + $quantity;
+            if (array_key_exists('unit_cost', $line) && $line['unit_cost'] !== null && $line['unit_cost'] !== '') {
+                $lines[$variantId]['unit_cost'] = (int) $line['unit_cost'];
+            }
+        }
+
+        return $lines;
+    }
+
+    private function assertReceiptActive(StockReceipt $receipt): void
+    {
+        if ($receipt->isCancelled()) {
+            throw new InvalidArgumentException('Cet arrivage a déjà été annulé');
+        }
+    }
+
+    /**
+     * @param  list<int>  $ids
+     * @return \Illuminate\Support\Collection<int, ProductVariant>
+     */
+    private function lockVariantsById(array $ids): \Illuminate\Support\Collection
+    {
+        $unique = array_values(array_unique(array_map('intval', $ids)));
+        sort($unique);
+
+        $locked = collect();
+        foreach ($unique as $id) {
+            $variant = ProductVariant::query()->lockForUpdate()->find($id);
+            if (! $variant) {
+                throw new InvalidArgumentException('Variante introuvable');
+            }
+            $locked[$id] = $variant;
+        }
+
+        return $locked;
+    }
+
+    /**
+     * @param  array<string, mixed>  $properties
+     */
+    private function applyQuantityDelta(
+        ProductVariant $locked,
+        int $delta,
+        User $actor,
+        StockReceipt $receipt,
+        string $type,
+        string $reason,
+        array $properties = [],
+    ): void {
+        if ($delta === 0) {
+            return;
+        }
+
+        $before = $locked->stock_quantity;
+        $onHand = $before === null ? 0 : max(0, (int) $before);
+        $reserved = max(0, (int) ($locked->reserved_quantity ?? 0));
+
+        if ($delta < 0) {
+            $available = max(0, $onHand - $reserved);
+            if (abs($delta) > $available) {
+                throw new InvalidArgumentException(
+                    'Impossible de retirer '.$this->variantLabel($locked).' : des pièces ont déjà été vendues ou réservées'
+                );
+            }
+        }
+
+        $locked->stock_quantity = $onHand + $delta;
+        $locked->save();
+
+        $this->writeMovement(
+            $locked,
+            $delta,
+            $type,
+            'admin',
+            $actor,
+            $receipt,
+            $reason,
+            array_merge([
+                'from' => $before,
+                'to' => (int) $locked->stock_quantity,
+            ], $properties),
+        );
+    }
+
+    private function variantLabel(ProductVariant $variant): string
+    {
+        $variant->loadMissing('product');
+
+        return trim(($variant->product?->name ?? 'Produit').' · '.$variant->name);
     }
 
     /**

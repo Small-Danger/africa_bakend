@@ -20,6 +20,8 @@ class ActivityLog extends Model
             'settings.updated' => 'Paramètres mis à jour',
             'stock.adjusted' => 'Stock corrigé',
             'stock.received' => 'Réception de stock',
+            'stock.receipt_updated' => 'Arrivage modifié',
+            'stock.receipt_cancelled' => 'Arrivage annulé',
         ];
     }
 

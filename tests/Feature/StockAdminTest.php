@@ -194,3 +194,120 @@ test('le résumé du mois additionne marchandise et transport', function () {
         ->assertJsonPath('data.items.0.invested', 275000);
 });
 
+test('un admin corrige un arrivage et le stock suit la différence', function () {
+    $variant = stockPageVariant(['stock_quantity' => 10]);
+    $admin = User::factory()->admin()->create();
+    $token = $admin->createToken('test')->plainTextToken;
+
+    $created = $this->withToken($token)
+        ->postJson('/api/admin/stock/receipts', [
+            'items' => [['variant_id' => $variant->id, 'quantity' => 20]],
+            'merchandise_cost' => 200000,
+            'shipping_cost' => 75000,
+        ])
+        ->assertCreated()
+        ->json('data.receipt.id');
+
+    $this->withToken($token)
+        ->putJson('/api/admin/stock/receipts/'.$created, [
+            'items' => [['variant_id' => $variant->id, 'quantity' => 12]],
+            'merchandise_cost' => 120000,
+            'shipping_cost' => 75000,
+            'note' => 'Erreur de saisie, 12 pas 20',
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.receipt.units', 12)
+        ->assertJsonPath('data.receipt.merchandise_cost', 120000)
+        ->assertJsonPath('data.receipt.cancelled', false);
+
+    expect($variant->fresh()->stock_quantity)->toBe(22)
+        ->and(StockMovement::query()->where('type', 'reception_correction')->count())->toBe(1)
+        ->and(ActivityLog::query()->where('action', 'stock.receipt_updated')->count())->toBe(1);
+});
+
+test('un admin annule un arrivage en tapant DELETE sans effacer l’historique', function () {
+    $variant = stockPageVariant(['stock_quantity' => 10]);
+    $admin = User::factory()->admin()->create();
+    $token = $admin->createToken('test')->plainTextToken;
+
+    $created = $this->withToken($token)
+        ->postJson('/api/admin/stock/receipts', [
+            'items' => [['variant_id' => $variant->id, 'quantity' => 20]],
+            'merchandise_cost' => 200000,
+            'shipping_cost' => 75000,
+        ])
+        ->assertCreated()
+        ->json('data.receipt.id');
+
+    $this->withToken($token)
+        ->deleteJson('/api/admin/stock/receipts/'.$created, ['confirmation' => 'delete'])
+        ->assertStatus(422);
+
+    $this->withToken($token)
+        ->deleteJson('/api/admin/stock/receipts/'.$created, ['confirmation' => 'DELETE'])
+        ->assertOk()
+        ->assertJsonPath('data.receipt.cancelled', true)
+        ->assertJsonPath('data.receipt.invested', 0);
+
+    expect($variant->fresh()->stock_quantity)->toBe(10)
+        ->and(StockMovement::query()->where('type', 'reception')->count())->toBe(1)
+        ->and(StockMovement::query()->where('type', 'reception_annulee')->count())->toBe(1)
+        ->and(ActivityLog::query()->where('action', 'stock.receipt_cancelled')->count())->toBe(1);
+
+    $this->withToken($token)
+        ->getJson('/api/admin/stock/receipts')
+        ->assertOk()
+        ->assertJsonPath('data.items.0.cancelled', true)
+        ->assertJsonPath('data.summary.invested', 0)
+        ->assertJsonPath('data.summary.receipts_count', 0);
+
+    $this->withToken($token)
+        ->deleteJson('/api/admin/stock/receipts/'.$created, ['confirmation' => 'DELETE'])
+        ->assertStatus(422);
+});
+
+test('on ne peut pas annuler un arrivage si les pièces ont déjà été vendues', function () {
+    $variant = stockPageVariant(['stock_quantity' => 10]);
+    $admin = User::factory()->admin()->create();
+    $token = $admin->createToken('test')->plainTextToken;
+
+    $created = $this->withToken($token)
+        ->postJson('/api/admin/stock/receipts', [
+            'items' => [['variant_id' => $variant->id, 'quantity' => 20]],
+        ])
+        ->assertCreated()
+        ->json('data.receipt.id');
+
+    $this->withToken($token)
+        ->putJson('/api/admin/stock/'.$variant->id, ['quantity' => 5, 'reason' => 'Ventes'])
+        ->assertOk();
+
+    $this->withToken($token)
+        ->deleteJson('/api/admin/stock/receipts/'.$created, ['confirmation' => 'DELETE'])
+        ->assertStatus(422);
+
+    expect($variant->fresh()->stock_quantity)->toBe(5);
+});
+
+test('une secrétaire ne peut ni corriger ni annuler un arrivage', function () {
+    $variant = stockPageVariant();
+    $admin = User::factory()->admin()->create();
+    $created = $this->withToken($admin->createToken('test')->plainTextToken)
+        ->postJson('/api/admin/stock/receipts', [
+            'items' => [['variant_id' => $variant->id, 'quantity' => 5]],
+        ])
+        ->json('data.receipt.id');
+
+    $secretaire = User::factory()->secretaire()->create();
+
+    $this->actingAs($secretaire, 'sanctum')
+        ->putJson('/api/admin/stock/receipts/'.$created, [
+            'items' => [['variant_id' => $variant->id, 'quantity' => 1]],
+        ])
+        ->assertForbidden();
+
+    $this->actingAs($secretaire, 'sanctum')
+        ->deleteJson('/api/admin/stock/receipts/'.$created, ['confirmation' => 'DELETE'])
+        ->assertForbidden();
+});
+

@@ -95,3 +95,24 @@ test('un admin voit l’investissement du mois face aux ventes hors annulations'
         ->assertJsonPath('data.remaining', 195000)
         ->assertJsonPath('data.recovered', false);
 });
+
+test('un arrivage annulé sort du rapport finance du mois', function () {
+    $admin = User::factory()->admin()->create();
+    $variant = financeVariant();
+    $now = now();
+
+    $receipt = app(StockService::class)->receiveReceipt([
+        'items' => [['variant_id' => $variant->id, 'quantity' => 10]],
+        'merchandise_cost' => 200000,
+        'shipping_cost' => 75000,
+        'received_at' => $now,
+    ], $admin);
+
+    app(StockService::class)->cancelReceipt($receipt, $admin, 'DELETE');
+
+    $this->withToken($admin->createToken('test')->plainTextToken)
+        ->getJson('/api/admin/finance/month?year='.$now->year.'&month='.$now->month)
+        ->assertOk()
+        ->assertJsonPath('data.invested', 0)
+        ->assertJsonPath('data.receipts_count', 0);
+});

@@ -26,7 +26,9 @@ class AdminFinanceController extends Controller
         $start = Carbon::create($year, $month, 1)->startOfMonth();
         $end = $start->copy()->endOfMonth();
 
-        $receipts = StockReceipt::query()->whereBetween('received_at', [$start, $end]);
+        $receipts = StockReceipt::query()
+            ->active()
+            ->whereBetween('received_at', [$start, $end]);
         $merchandise = (int) (clone $receipts)->sum('merchandise_cost');
         $shipping = (int) (clone $receipts)->sum('shipping_cost');
         $invested = $merchandise + $shipping;
