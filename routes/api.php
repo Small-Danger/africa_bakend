@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AdminActivityController;
+use App\Http\Controllers\Api\AdminAlertController;
 use App\Http\Controllers\Api\AdminCashierController;
 use App\Http\Controllers\Api\AdminCashCloseController;
 use App\Http\Controllers\Api\AdminOrderPaymentController;
@@ -194,6 +195,8 @@ Route::middleware(['auth:sanctum', 'admin'])->prefix('admin')->group(function ()
         Route::get('/closes', [AdminCashCloseController::class, 'index']);
         Route::get('/closes/{id}', [AdminCashCloseController::class, 'show']);
     });
+
+    Route::get('/alerts', [AdminAlertController::class, 'index']);
 
     Route::middleware('permission:activity.view')->prefix('activity')->group(function () {
         Route::get('/', [AdminActivityController::class, 'index']);

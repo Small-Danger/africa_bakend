@@ -529,10 +529,11 @@ final class StockService
 
         $orderIds = $holdIds->merge($agedIds)->unique()->filter()->values()->all();
         $freedVariantIds = [];
+        $expiredIds = [];
         $count = 0;
 
         foreach ($orderIds as $orderId) {
-            DB::transaction(function () use ($orderId, $cutoff, &$count, &$freedVariantIds) {
+            DB::transaction(function () use ($orderId, $cutoff, &$count, &$freedVariantIds, &$expiredIds) {
                 $order = Order::query()->lockForUpdate()->find($orderId);
                 if (! $order || ! in_array($order->status, ['en_attente', 'acceptée'], true)) {
                     return;
@@ -600,11 +601,23 @@ final class StockService
                     'system',
                 );
 
+                $expiredIds[] = $order->id;
                 $count++;
             });
         }
 
         $this->fulfillAfterStockFreed($freedVariantIds);
+
+        foreach ($expiredIds as $expiredId) {
+            $expired = Order::query()->with(['client', 'payments'])->find($expiredId);
+            if ($expired) {
+                try {
+                    app(OrderNotifier::class)->notify($expired, OrderNotifier::EXPIRED);
+                } catch (\Throwable $e) {
+                    report($e);
+                }
+            }
+        }
 
         return $count;
     }
@@ -1377,6 +1390,15 @@ final class StockService
                 $order->save();
                 $this->confirmReservationsFor($order, $actor, 'site');
             });
+
+            $ready = Order::query()->with(['client', 'payments'])->find($orderId);
+            if ($ready && $ready->status === 'prête') {
+                try {
+                    app(OrderNotifier::class)->notify($ready, OrderNotifier::PREORDER);
+                } catch (\Throwable $e) {
+                    report($e);
+                }
+            }
         }
     }
 

@@ -1139,7 +1139,26 @@ class OrderController extends Controller
                 });
             }
 
-            $payments = app(OrderPaymentService::class)->present($order->fresh(['payments.recordedBy', 'cancelledByUser']));
+            $fresh = $order->fresh(['payments.recordedBy', 'cancelledByUser', 'client']);
+            $payments = app(OrderPaymentService::class)->present($fresh);
+
+            if (! $cancelling && $oldStatus !== $fresh->status) {
+                $event = match ($fresh->status) {
+                    'acceptée' => \App\Services\OrderNotifier::ACCEPTED,
+                    'prête' => \App\Services\OrderNotifier::READY,
+                    'disponible' => \App\Services\OrderNotifier::AVAILABLE,
+                    default => null,
+                };
+                if ($event) {
+                    try {
+                        app(\App\Services\OrderNotifier::class)->notify($fresh, $event);
+                    } catch (\Throwable $e) {
+                        report($e);
+                    }
+                }
+            }
+
+            $order = $fresh;
 
             // Formater la réponse
             $formattedOrder = [

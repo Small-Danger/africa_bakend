@@ -149,7 +149,7 @@ final class OrderPaymentService
         ?string $reference = null,
         ?string $note = null,
     ): OrderPayment {
-        return DB::transaction(function () use ($order, $actor, $method, $amount, $reference, $note) {
+        $payment = DB::transaction(function () use ($order, $actor, $method, $amount, $reference, $note) {
             $locked = Order::query()->lockForUpdate()->findOrFail($order->id);
             $locked->load('payments');
 
@@ -218,6 +218,19 @@ final class OrderPaymentService
 
             return $payment;
         });
+
+        try {
+            $fresh = $order->fresh(['client', 'payments']);
+            $snap = $this->snapshot($fresh);
+            app(OrderNotifier::class)->notify($fresh, OrderNotifier::PAYMENT, [
+                'paid_amount' => $snap['paid_amount'],
+                'balance' => $snap['balance'],
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        return $payment;
     }
 
     public function assertCanAccept(Order $order): void

@@ -19,7 +19,7 @@ final class OrderCancellationService
             throw new InvalidArgumentException('Le motif ne peut pas dépasser 1000 caractères');
         }
 
-        return DB::transaction(function () use ($order, $actor, $reason, $channel) {
+        $cancelled = DB::transaction(function () use ($order, $actor, $reason, $channel) {
             $locked = Order::query()->lockForUpdate()->findOrFail($order->id);
 
             if ($locked->isClosed()) {
@@ -61,5 +61,17 @@ final class OrderCancellationService
 
             return $locked->fresh(['payments', 'cancelledByUser', 'client']);
         });
+
+        try {
+            $snap = app(OrderPaymentService::class)->snapshot($cancelled);
+            app(OrderNotifier::class)->notify($cancelled, OrderNotifier::CANCELLED, [
+                'reason' => $cancelled->cancellation_reason,
+                'refunded_amount' => $snap['refunded_amount'],
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        return $cancelled;
     }
-};
+}

@@ -31,9 +31,10 @@ class NotificationController extends Controller
             }
 
             // Récupérer les notifications de l'utilisateur
+            $perPage = min(max((int) $request->input('per_page', 20), 1), 50);
             $notifications = Notification::where('user_id', $user->id)
                 ->orderBy('created_at', 'desc')
-                ->paginate(20);
+                ->paginate($perPage);
 
             // Formater les notifications
             $formattedNotifications = $notifications->getCollection()->map(function ($notification) {
