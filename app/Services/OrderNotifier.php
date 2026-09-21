@@ -15,6 +15,8 @@ final class OrderNotifier
 {
     public const PAYMENT = 'payment_recorded';
 
+    public const PLACED = 'order_placed';
+
     public const ACCEPTED = 'order_accepted';
 
     public const READY = 'order_ready';
@@ -49,7 +51,7 @@ final class OrderNotifier
             ]);
         }
 
-        $this->queueEmail($order->client, $copy, $notification);
+        $this->sendEmailNow($order->client, $copy, $notification);
 
         return $notification;
     }
@@ -57,7 +59,7 @@ final class OrderNotifier
     /**
      * @param  array{title: string, message: string, order_number: string}  $copy
      */
-    private function queueEmail(?User $client, array $copy, ?Notification $notification): void
+    private function sendEmailNow(?User $client, array $copy, ?Notification $notification): void
     {
         $reason = $this->emailSkipReason($client);
         if ($reason !== null) {
@@ -69,21 +71,7 @@ final class OrderNotifier
             return;
         }
 
-        $send = function () use ($client, $copy, $notification): void {
-            if (function_exists('fastcgi_finish_request')) {
-                fastcgi_finish_request();
-            }
-
-            $this->sendEmail($client, $copy, $notification);
-        };
-
-        if (app()->runningUnitTests()) {
-            $send();
-
-            return;
-        }
-
-        app()->terminating($send);
+        $this->sendEmail($client, $copy, $notification);
     }
 
     /**
@@ -92,6 +80,12 @@ final class OrderNotifier
     private function sendEmail(User $client, array $copy, ?Notification $notification): void
     {
         try {
+            Log::info('Order email sending', [
+                'mailer' => config('mail.default'),
+                'from' => config('mail.from.address'),
+                'to' => $client->email,
+            ]);
+
             Mail::to($client->email)->send(new OrderStatusMail(
                 $copy['title'],
                 $copy['message'],
@@ -104,6 +98,12 @@ final class OrderNotifier
                 $notification->save();
             }
         } catch (Throwable $e) {
+            Log::error('Order email failed', [
+                'to' => $client->email,
+                'from' => config('mail.from.address'),
+                'mailer' => config('mail.default'),
+                'error' => $e->getMessage(),
+            ]);
             report($e);
         }
     }
@@ -149,6 +149,7 @@ final class OrderNotifier
         $reason = trim((string) ($extra['reason'] ?? $order->cancellation_reason ?? ''));
 
         [$title, $message] = match ($event) {
+            self::PLACED => ['Commande enregistrée', 'Nous avons bien reçu '.$number.' ('.$total.' FCFA). Nous vous contactons pour le paiement.'],
             self::PAYMENT => $balance <= 0
                 ? ['Commande soldée', $number.' est payée intégralement ('.$total.' FCFA).']
                 : ['Acompte reçu', 'Nous avons enregistré '.$paid.' FCFA sur '.$number.'. Reste '.$balance.' FCFA.'],

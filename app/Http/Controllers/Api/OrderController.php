@@ -193,6 +193,12 @@ class OrderController extends Controller
                 // Charger les relations pour la réponse
                 $order->load(['items.product', 'items.variant', 'client', 'payments']);
 
+                try {
+                    app(\App\Services\OrderNotifier::class)->notify($order, \App\Services\OrderNotifier::PLACED);
+                } catch (\Throwable $e) {
+                    report($e);
+                }
+
                 // Formater la réponse
                 $formattedOrder = [
                     'id' => $order->id,

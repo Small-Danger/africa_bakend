@@ -75,6 +75,18 @@ function notifyOrder(?User $client = null): Order
     return $order->fresh(['client', 'payments']);
 }
 
+test('une commande enregistrée notifie le client par e-mail', function () {
+    $client = User::factory()->create(['email' => 'awa@example.com']);
+    $order = notifyOrder($client);
+
+    app(\App\Services\OrderNotifier::class)->notify($order, \App\Services\OrderNotifier::PLACED);
+
+    expect(Notification::query()->where('user_id', $client->id)->value('title'))->toBe('Commande enregistrée');
+    Mail::assertSent(OrderStatusMail::class, function (OrderStatusMail $mail) use ($client) {
+        return $mail->hasTo($client->email) && str_contains($mail->heading, 'Commande enregistrée');
+    });
+});
+
 test('un acompte crée une notification client et envoie un e-mail', function () {
     $admin = User::factory()->admin()->create();
     $client = User::factory()->create(['email' => 'awa@example.com']);
