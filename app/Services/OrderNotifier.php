@@ -7,6 +7,7 @@ use App\Models\Notification;
 use App\Models\Order;
 use App\Models\ShopSetting;
 use App\Models\User;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Throwable;
 
@@ -48,11 +49,7 @@ final class OrderNotifier
             ]);
         }
 
-        $emailSent = $this->sendEmail($order->client, $copy);
-        if ($notification && $emailSent) {
-            $notification->data = array_merge($notification->data ?? [], ['email_sent' => true]);
-            $notification->save();
-        }
+        $this->queueEmail($order->client, $copy, $notification);
 
         return $notification;
     }
@@ -60,12 +57,40 @@ final class OrderNotifier
     /**
      * @param  array{title: string, message: string, order_number: string}  $copy
      */
-    private function sendEmail(?User $client, array $copy): bool
+    private function queueEmail(?User $client, array $copy, ?Notification $notification): void
     {
-        if (! $this->canEmail($client)) {
-            return false;
+        $reason = $this->emailSkipReason($client);
+        if ($reason !== null) {
+            Log::info('Order email skipped', [
+                'reason' => $reason,
+                'email' => $client?->email,
+            ]);
+
+            return;
         }
 
+        $send = function () use ($client, $copy, $notification): void {
+            if (function_exists('fastcgi_finish_request')) {
+                fastcgi_finish_request();
+            }
+
+            $this->sendEmail($client, $copy, $notification);
+        };
+
+        if (app()->runningUnitTests()) {
+            $send();
+
+            return;
+        }
+
+        app()->terminating($send);
+    }
+
+    /**
+     * @param  array{title: string, message: string, order_number: string}  $copy
+     */
+    private function sendEmail(User $client, array $copy, ?Notification $notification): void
+    {
         try {
             Mail::to($client->email)->send(new OrderStatusMail(
                 $copy['title'],
@@ -73,36 +98,41 @@ final class OrderNotifier
                 $copy['order_number'],
             ));
 
-            return true;
+            if ($notification) {
+                $notification->refresh();
+                $notification->data = array_merge($notification->data ?? [], ['email_sent' => true]);
+                $notification->save();
+            }
         } catch (Throwable $e) {
             report($e);
-
-            return false;
         }
     }
 
-    private function canEmail(?User $client): bool
+    private function emailSkipReason(?User $client): ?string
     {
         if (! $client) {
-            return false;
+            return 'no_client';
         }
 
         if (! ShopSetting::current()->notify_email) {
-            return false;
+            return 'notify_email_off';
         }
 
         $email = strtolower(trim((string) $client->email));
         if ($email === '' || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            return false;
+            return 'invalid_email';
         }
 
         if (str_ends_with($email, '@afrikraga.local') || str_ends_with($email, '@bs-shop.com')) {
-            return false;
+            return 'technical_email';
         }
 
         $local = explode('@', $email)[0] ?? '';
+        if (str_starts_with($local, 'pos_') || str_starts_with($local, 'temp_')) {
+            return 'technical_email';
+        }
 
-        return ! str_starts_with($local, 'pos_') && ! str_starts_with($local, 'temp_');
+        return null;
     }
 
     /**
