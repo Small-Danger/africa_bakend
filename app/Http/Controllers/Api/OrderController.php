@@ -9,6 +9,7 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\ProductVariant;
 use App\Models\User;
+use App\Services\OrderCancellationService;
 use App\Services\OrderPaymentService;
 use App\Services\PosClientResolver;
 use App\Services\StockService;
@@ -708,6 +709,7 @@ class OrderController extends Controller
                 'reservations',
                 'preorders',
                 'payments.recordedBy',
+                'cancelledByUser',
             ]);
 
             if ($request->boolean('to_validate')) {
@@ -745,6 +747,7 @@ class OrderController extends Controller
                     'updated_at' => $order->updated_at,
                     'reservation' => app(StockService::class)->presentReservation($order),
                     'preorder' => app(StockService::class)->presentPreorder($order),
+                    'cancellation' => $order->presentCancellation(true),
                     ...$payments->present($order),
                 ];
             });
@@ -821,6 +824,7 @@ class OrderController extends Controller
                 'reservations',
                 'preorders',
                 'payments.recordedBy',
+                'cancelledByUser',
             ])->find($id);
 
             if (! $order) {
@@ -842,6 +846,7 @@ class OrderController extends Controller
                 'channel' => $order->channel ?? 'en_ligne',
                 'reservation' => app(StockService::class)->presentReservation($order),
                 'preorder' => app(StockService::class)->presentPreorder($order),
+                'cancellation' => $order->presentCancellation(true),
                 ...app(OrderPaymentService::class)->present($order),
                 'items' => $order->items->map(function ($item) {
                     $product = $item->product;
@@ -1043,13 +1048,24 @@ class OrderController extends Controller
                 ], 403);
             }
 
+            $requestedStatus = (string) $request->input('status');
+            if ($requestedStatus === 'annulée' && ! $request->user()->hasPermissionTo(Permissions::ORDERS_CANCEL)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Vous n\'avez pas le droit d\'annuler une commande',
+                ], 403);
+            }
+
             $validator = Validator::make($request->all(), [
                 'status' => 'required|in:en_attente,acceptée,prête,en_cours,disponible,annulée',
                 'notes' => 'nullable|string|max:1000',
+                'cancellation_reason' => 'required_if:status,annulée|nullable|string|min:3|max:1000',
             ], [
                 'status.required' => 'Le statut est requis',
                 'status.in' => 'Statut invalide',
                 'notes.max' => 'Les notes ne peuvent pas dépasser 1000 caractères',
+                'cancellation_reason.required_if' => 'Le motif d’annulation est obligatoire',
+                'cancellation_reason.min' => 'Le motif d’annulation est obligatoire (3 caractères minimum)',
             ]);
 
             if ($validator->fails()) {
@@ -1101,23 +1117,29 @@ class OrderController extends Controller
 
             $oldStatus = $order->status;
 
-            DB::transaction(function () use ($request, $order, $newStatus, $cancelling) {
-                $channel = $order->channel === 'boutique' ? 'pos' : 'site';
-                app(StockService::class)->syncOrderHold($order, $newStatus, $request->user(), $channel);
+            if ($cancelling) {
+                $order = app(OrderCancellationService::class)->cancel(
+                    $order,
+                    $request->user(),
+                    (string) $request->input('cancellation_reason'),
+                    ($order->channel ?? 'en_ligne') === 'boutique' ? 'pos' : 'admin',
+                );
+            } else {
+                DB::transaction(function () use ($request, $order, $newStatus) {
+                    $channel = $order->channel === 'boutique' ? 'pos' : 'site';
+                    app(StockService::class)->syncOrderHold($order, $newStatus, $request->user(), $channel);
 
-                if ($cancelling) {
-                    $order->cancelled_by = $request->user()->id;
-                    $order->cancelled_at = now();
-                }
+                    $order->status = $newStatus;
 
-                $order->status = $newStatus;
+                    if ($request->has('notes')) {
+                        $order->notes = $request->notes;
+                    }
 
-                if ($request->has('notes')) {
-                    $order->notes = $request->notes;
-                }
+                    $order->save();
+                });
+            }
 
-                $order->save();
-            });
+            $payments = app(OrderPaymentService::class)->present($order->fresh(['payments.recordedBy', 'cancelledByUser']));
 
             // Formater la réponse
             $formattedOrder = [
@@ -1129,7 +1151,9 @@ class OrderController extends Controller
                 'client' => $this->formatOrderClient($order),
                 'total_amount' => $order->total_amount,
                 'notes' => $order->notes,
+                'cancellation' => $order->presentCancellation(true),
                 'updated_at' => $order->updated_at,
+                ...$payments,
             ];
 
             return response()->json([

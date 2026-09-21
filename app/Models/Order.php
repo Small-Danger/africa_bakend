@@ -89,6 +89,28 @@ class Order extends Model
         return in_array($this->status, self::closedStatuses(), true);
     }
 
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function presentCancellation(bool $includeActor = false): ?array
+    {
+        if (! $this->cancellation_reason && ! $this->cancelled_at) {
+            return null;
+        }
+
+        $payload = [
+            'reason' => $this->cancellation_reason,
+            'cancelled_at' => optional($this->cancelled_at)->toIso8601String(),
+            'kind' => $this->status === 'expirée' ? 'expired' : 'cancelled',
+        ];
+
+        if ($includeActor) {
+            $payload['cancelled_by'] = $this->cancelledByUser?->name;
+        }
+
+        return $payload;
+    }
+
     // Scope pour les commandes en attente
     public function scopePending($query)
     {

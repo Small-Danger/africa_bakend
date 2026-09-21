@@ -17,6 +17,10 @@ final class OrderPaymentService
 
     public const STATUS_PAID = 'paye';
 
+    public const STATUS_REFUNDED = 'rembourse';
+
+    public const METHOD_CREDIT = 'avoir';
+
     /**
      * @return array<string, string>
      */
@@ -26,7 +30,17 @@ final class OrderPaymentService
             self::STATUS_UNPAID => 'Non payé',
             self::STATUS_PARTIAL => 'Acompte',
             self::STATUS_PAID => 'Payé',
+            self::STATUS_REFUNDED => 'Remboursé',
         ];
+    }
+
+    public static function methodLabel(string $method): string
+    {
+        if ($method === self::METHOD_CREDIT) {
+            return 'Avoir / remboursement';
+        }
+
+        return ShopSetting::paymentMethodLabels()[$method] ?? $method;
     }
 
     /**
@@ -37,11 +51,18 @@ final class OrderPaymentService
         $order->loadMissing('payments');
 
         $due = (int) round((float) $order->total_amount);
-        $paid = (int) round((float) $order->payments->sum('amount'));
-        $balance = max(0, $due - $paid);
-        $status = $paid <= 0
-            ? self::STATUS_UNPAID
-            : ($paid >= $due ? self::STATUS_PAID : self::STATUS_PARTIAL);
+        $paid = (int) round((float) $order->payments
+            ->reject(fn (OrderPayment $payment) => $payment->method === self::METHOD_CREDIT)
+            ->sum('amount'));
+        $refunded = (int) round((float) $order->payments
+            ->where('method', self::METHOD_CREDIT)
+            ->sum('amount'));
+        $balance = $order->isClosed() ? 0 : max(0, $due - $paid);
+        $status = $paid > 0 && $refunded >= $paid
+            ? self::STATUS_REFUNDED
+            : ($paid <= 0
+                ? self::STATUS_UNPAID
+                : ($paid >= $due ? self::STATUS_PAID : self::STATUS_PARTIAL));
 
         $settings = ShopSetting::current();
         $percent = max(0, min(100, (int) $settings->min_deposit_percent));
@@ -52,6 +73,7 @@ final class OrderPaymentService
             'payment_status' => $status,
             'payment_status_label' => self::statusLabels()[$status],
             'paid_amount' => $paid,
+            'refunded_amount' => $refunded,
             'balance' => $balance,
             'due_amount' => $due,
             'min_deposit_percent' => $percent,
@@ -85,7 +107,7 @@ final class OrderPaymentService
                 ->map(fn (OrderPayment $payment) => [
                     'id' => $payment->id,
                     'method' => $payment->method,
-                    'method_label' => ShopSetting::paymentMethodLabels()[$payment->method] ?? $payment->method,
+                    'method_label' => self::methodLabel((string) $payment->method),
                     'amount' => (int) round((float) $payment->amount),
                     'reference' => $payment->reference,
                     'note' => $payment->note,
@@ -106,8 +128,10 @@ final class OrderPaymentService
             'payment_status' => $full['payment_status'],
             'payment_status_label' => $full['payment_status_label'],
             'paid_amount' => $full['paid_amount'],
+            'refunded_amount' => $full['refunded_amount'],
             'balance' => $full['balance'],
             'due_amount' => $full['due_amount'],
+            'cancellation' => $order->presentCancellation(),
             'payments' => collect($full['payments'])->map(fn (array $payment) => [
                 'method' => $payment['method'],
                 'method_label' => $payment['method_label'],
@@ -139,6 +163,10 @@ final class OrderPaymentService
 
             if (($locked->channel ?? 'en_ligne') === 'boutique') {
                 throw new InvalidArgumentException('Cette vente de caisse est déjà encaissée');
+            }
+
+            if ($method === self::METHOD_CREDIT) {
+                throw new InvalidArgumentException('Un avoir se crée uniquement à l’annulation');
             }
 
             $allowed = $this->enabledMethods();
@@ -204,6 +232,30 @@ final class OrderPaymentService
                 ? 'Acompte insuffisant : '.$snap['min_deposit_amount'].' FCFA requis ('.$snap['min_deposit_percent'].' %)'
                 : 'Le paiement n’est pas encore validé'
         );
+    }
+
+    public function issueCredit(Order $order, User $actor, string $reason): ?OrderPayment
+    {
+        $order->loadMissing('payments');
+        $incoming = (int) round((float) $order->payments
+            ->reject(fn (OrderPayment $payment) => $payment->method === self::METHOD_CREDIT)
+            ->sum('amount'));
+        $already = (int) round((float) $order->payments
+            ->where('method', self::METHOD_CREDIT)
+            ->sum('amount'));
+        $amount = max(0, $incoming - $already);
+
+        if ($amount < 1) {
+            return null;
+        }
+
+        return OrderPayment::query()->create([
+            'order_id' => $order->id,
+            'method' => self::METHOD_CREDIT,
+            'amount' => $amount,
+            'note' => $reason,
+            'recorded_by' => $actor->id,
+        ]);
     }
 
     /**

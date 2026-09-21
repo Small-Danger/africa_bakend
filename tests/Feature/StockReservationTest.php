@@ -121,7 +121,10 @@ test('annuler une commande réservée libère le stock sans le recréditer', fun
     $stock->reserveForOrder($order, $admin);
 
     $this->actingAs($admin, 'sanctum')
-        ->putJson('/api/admin/orders/'.$order->id.'/status', ['status' => 'annulée'])
+        ->putJson('/api/admin/orders/'.$order->id.'/status', [
+            'status' => 'annulée',
+            'cancellation_reason' => 'Client a changé d’avis',
+        ])
         ->assertOk();
 
     $fresh = $variant->fresh();

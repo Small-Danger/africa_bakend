@@ -31,6 +31,7 @@ class ActivityLog extends Model
             'cash.closed' => 'Clôture de caisse',
             'order.payment_recorded' => 'Paiement enregistré',
             'order.expired' => 'Commande expirée',
+            'order.cancelled' => 'Commande annulée',
         ];
     }
 

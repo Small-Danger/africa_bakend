@@ -182,7 +182,10 @@ test('annuler une commande site remet le stock réellement sorti', function () {
     $admin = User::factory()->admin()->create();
 
     $this->withToken($admin->createToken('test')->plainTextToken)
-        ->putJson('/api/admin/orders/'.$order->id.'/status', ['status' => 'annulée'])
+        ->putJson('/api/admin/orders/'.$order->id.'/status', [
+            'status' => 'annulée',
+            'cancellation_reason' => 'Erreur de préparation',
+        ])
         ->assertOk()
         ->assertJsonPath('data.status', 'annulée');
 

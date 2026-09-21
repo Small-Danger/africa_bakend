@@ -131,7 +131,10 @@ test('annuler une précommande la retire de la file', function () {
     $stock->reserveForOrder($order);
 
     $this->actingAs($admin, 'sanctum')
-        ->putJson('/api/admin/orders/'.$order->id.'/status', ['status' => 'annulée'])
+        ->putJson('/api/admin/orders/'.$order->id.'/status', [
+            'status' => 'annulée',
+            'cancellation_reason' => 'Précommande abandonnée',
+        ])
         ->assertOk();
 
     expect(StockPreorder::query()->where('order_id', $order->id)->value('status'))->toBe('cancelled')

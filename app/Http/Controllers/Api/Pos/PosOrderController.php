@@ -9,6 +9,7 @@ use App\Models\OrderItem;
 use App\Models\OrderPayment;
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Services\OrderCancellationService;
 use App\Services\PosClientResolver;
 use App\Services\StockService;
 use Illuminate\Http\JsonResponse;
@@ -223,9 +224,10 @@ class PosOrderController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
-            'cancellation_reason' => 'required|string|max:1000',
+            'cancellation_reason' => 'required|string|min:3|max:1000',
         ], [
             'cancellation_reason.required' => 'Le motif d\'annulation est obligatoire',
+            'cancellation_reason.min' => 'Le motif d\'annulation est obligatoire (3 caractères minimum)',
         ]);
 
         if ($validator->fails()) {
@@ -252,27 +254,22 @@ class PosOrderController extends Controller
             ], 422);
         }
 
-        if ($order->status === 'annulée') {
+        if ($order->isClosed()) {
             return response()->json([
                 'success' => false,
-                'message' => 'Cette vente est déjà annulée',
+                'message' => $order->status === 'expirée'
+                    ? 'Cette vente est expirée'
+                    : 'Cette vente est déjà annulée',
             ], 422);
         }
 
         try {
-            DB::beginTransaction();
-
-            $this->stock()->reverseSalesFor($order, 'pos', $request->user());
-
-            $order->update([
-                'status' => 'annulée',
-                'cancelled_by' => $request->user()->id,
-                'cancellation_reason' => $request->cancellation_reason,
-                'cancelled_at' => now(),
-            ]);
-
-            DB::commit();
-
+            $order = app(OrderCancellationService::class)->cancel(
+                $order,
+                $request->user(),
+                (string) $request->cancellation_reason,
+                'pos',
+            );
             $order->load(['items.product', 'items.variant', 'client', 'payments', 'cashier']);
 
             return response()->json([
@@ -280,9 +277,12 @@ class PosOrderController extends Controller
                 'message' => 'Vente annulée — stock remis à jour',
                 'data' => $this->formatOrder($order),
             ]);
+        } catch (InvalidArgumentException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 422);
         } catch (\Exception $e) {
-            DB::rollBack();
-
             return response()->json([
                 'success' => false,
                 'message' => 'Erreur lors de l\'annulation',
